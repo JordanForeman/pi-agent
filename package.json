@@ -1,0 +1,74 @@
+{
+  "name": "@jordanforeman/pi-agent",
+  "version": "0.1.0",
+  "description": "Jordan Foreman's shareable Pi agent configuration package.",
+  "type": "module",
+  "license": "UNLICENSED",
+  "keywords": [
+    "pi-package",
+    "pi",
+    "pi-coding-agent"
+  ],
+  "files": [
+    "agent/extensions/**/*",
+    "agent/extension-core/**/*",
+    "agent/optional-extensions/**/*",
+    "agent/prompts/**/*",
+    "agent/skills/**/*",
+    "agent/scripts/**/*",
+    "agent/subagents/**/*",
+    "agent/themes/**/*",
+    "scripts/**/*",
+    "AGENTS.md",
+    "README.md"
+  ],
+  "scripts": {
+    "postinstall": "node scripts/bootstrap-subagents.mjs",
+    "validate": "node agent/scripts/validate-taxonomy.mjs"
+  },
+  "dependencies": {
+    "pi-subagents": "^0.27.0"
+  },
+  "bundledDependencies": [
+    "pi-subagents"
+  ],
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
+    "typebox": "*"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-ai": {
+      "optional": true
+    },
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    },
+    "@earendil-works/pi-tui": {
+      "optional": true
+    },
+    "typebox": {
+      "optional": true
+    }
+  },
+  "pi": {
+    "extensions": [
+      "./node_modules/pi-subagents/src/extension/index.ts",
+      "./agent/extensions/*.ts",
+      "./agent/extensions/context-threshold/index.ts",
+      "./agent/extensions/workflows/*.ts"
+    ],
+    "skills": [
+      "./node_modules/pi-subagents/skills",
+      "./agent/skills"
+    ],
+    "prompts": [
+      "./node_modules/pi-subagents/prompts",
+      "./agent/prompts"
+    ],
+    "themes": [
+      "./agent/themes"
+    ]
+  }
+}
