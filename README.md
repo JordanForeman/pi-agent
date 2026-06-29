@@ -4,6 +4,25 @@ This directory contains the shareable Pi configuration synced across Jordan's ma
 
 > For package/extraction wiring, see the dotfiles repository; this repo owns the Pi agent resources themselves.
 
+## Installation
+
+Install directly from GitHub:
+
+```bash
+pi install git:git@github.com:JordanForeman/pi-agent.git@main
+```
+
+For a local checkout, install dependencies first so the bundled `pi-subagents` package and postinstall bootstrap are available, then install the package path:
+
+```bash
+git clone git@github.com:JordanForeman/pi-agent.git
+cd pi-agent
+npm install
+pi install "$PWD"
+```
+
+The `postinstall` script symlinks Markdown files under `agent/subagents/` into `~/.pi/agent/agents/` and `*.chain.md` files into `~/.pi/agent/chains/` for `pi-subagents` discovery. It respects `PI_CODING_AGENT_DIR` when set. Pi settings and keybindings are not installed by the package; they remain dotfiles/Home Manager concerns.
+
 ## Structure
 
 ```text
@@ -22,11 +41,13 @@ agent/
 
 ## Syncing & Runtime
 
-**pi-subagents** is the community extension for agent execution:
-- Installed via settings package: `npm:pi-subagents`
-- Agent discovery: `~/.pi/agent/agents` (synced from `agent/subagents/` by Home Manager)
+**pi-subagents** powers agent execution:
+- Package install: bundled as this package's hard dependency and loaded via the Pi manifest
+- Dotfiles/Home Manager install: may still install `npm:pi-subagents` separately
+- Agent discovery: bootstrapped symlinks from `agent/subagents/` into `~/.pi/agent/agents/`
+- Chain discovery: bootstrapped symlinks from `agent/subagents/*.chain.md` into `~/.pi/agent/chains/`
 
-**prompt-composer** is installed as an external Pi package:
+**prompt-composer** is installed as an external Pi package in the dotfiles-managed setup:
 - Source: `git:git@github.com:JordanForeman/pi-prompt-composer.git@1ccb7c4e2d9d491035bb456e9e99222d07f53d23`
 - It composes runtime guidance from the synced `agent/skills/**/SKILL.md` metadata.
 
@@ -75,13 +96,15 @@ ls -la ~/.pi/agent/agents
 
 ### Package not loaded
 
-Check settings include:
+Check settings include the package source:
 
 ```json
 "packages": [
-  "npm:pi-subagents"
+  "git:git@github.com:JordanForeman/pi-agent.git@main"
 ]
 ```
+
+For local checkouts, run `npm install` in the repo if `pi-subagents` resources or symlink bootstrapping are missing.
 
 ### Latest GPT models unavailable
 
