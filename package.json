@@ -27,9 +27,17 @@
     "validate": "node agent/scripts/validate-taxonomy.mjs"
   },
   "dependencies": {
+    "pi-autoresearch": "^1.6.0",
+    "pi-code-previews": "git+https://github.com/mattleong/pi-code-previews.git#e8499c0c60648e9a4544a8cb2fc117cd2dd18af7",
+    "pi-powerline-footer": "^0.5.6",
+    "pi-prompt-composer": "git+ssh://git@github.com/JordanForeman/pi-prompt-composer.git#1ccb7c4e2d9d491035bb456e9e99222d07f53d23",
     "pi-subagents": "^0.27.0"
   },
   "bundledDependencies": [
+    "pi-autoresearch",
+    "pi-code-previews",
+    "pi-powerline-footer",
+    "pi-prompt-composer",
     "pi-subagents"
   ],
   "peerDependencies": {
@@ -55,12 +63,17 @@
   "pi": {
     "extensions": [
       "./node_modules/pi-subagents/src/extension/index.ts",
+      "./node_modules/pi-powerline-footer/index.ts",
+      "./node_modules/pi-autoresearch/extensions",
+      "./node_modules/pi-prompt-composer/src/index.ts",
+      "./node_modules/pi-code-previews/index.ts",
       "./agent/extensions/*.ts",
       "./agent/extensions/context-threshold/index.ts",
       "./agent/extensions/workflows/*.ts"
     ],
     "skills": [
       "./node_modules/pi-subagents/skills",
+      "./node_modules/pi-autoresearch/skills",
       "./agent/skills"
     ],
     "prompts": [

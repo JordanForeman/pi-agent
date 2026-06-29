@@ -12,7 +12,7 @@ Install directly from GitHub:
 pi install git:git@github.com:JordanForeman/pi-agent.git@main
 ```
 
-For a local checkout, install dependencies first so the bundled `pi-subagents` package and postinstall bootstrap are available, then install the package path:
+For a local checkout, install dependencies first so bundled plugin packages and the postinstall bootstrap are available, then install the package path:
 
 ```bash
 git clone git@github.com:JordanForeman/pi-agent.git
@@ -22,6 +22,10 @@ pi install "$PWD"
 ```
 
 The `postinstall` script symlinks Markdown files under `agent/subagents/` into `~/.pi/agent/agents/` and `*.chain.md` files into `~/.pi/agent/chains/` for `pi-subagents` discovery. It respects `PI_CODING_AGENT_DIR` when set. Pi settings and keybindings are not installed by the package; they remain dotfiles/Home Manager concerns.
+
+Bundled plugin packages include `pi-subagents`, `pi-powerline-footer`, `pi-autoresearch`, `pi-prompt-composer`, and `pi-code-previews`.
+
+This repo sets `legacy-peer-deps=true` in `.npmrc` so Git/local installs do not try to resolve Pi runtime packages that Pi itself provides to extensions.
 
 ## Structure
 
@@ -47,8 +51,8 @@ agent/
 - Agent discovery: bootstrapped symlinks from `agent/subagents/` into `~/.pi/agent/agents/`
 - Chain discovery: bootstrapped symlinks from `agent/subagents/*.chain.md` into `~/.pi/agent/chains/`
 
-**prompt-composer** is installed as an external Pi package in the dotfiles-managed setup:
-- Source: `git:git@github.com:JordanForeman/pi-prompt-composer.git@1ccb7c4e2d9d491035bb456e9e99222d07f53d23`
+**prompt-composer** is loaded as part of this package, and may also be installed separately in dotfiles-managed setups:
+- Bundled dependency source: `git+ssh://git@github.com/JordanForeman/pi-prompt-composer.git#1ccb7c4e2d9d491035bb456e9e99222d07f53d23`
 - It composes runtime guidance from the synced `agent/skills/**/SKILL.md` metadata.
 
 ### Inheritance chain (work machine)
@@ -104,7 +108,7 @@ Check settings include the package source:
 ]
 ```
 
-For local checkouts, run `npm install` in the repo if `pi-subagents` resources or symlink bootstrapping are missing.
+For local checkouts, run `npm install` in the repo if bundled plugin resources or symlink bootstrapping are missing.
 
 ### Latest GPT models unavailable
 
