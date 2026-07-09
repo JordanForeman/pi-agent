@@ -17,7 +17,7 @@ When validating a change, **discover the project's own validation contract — d
 
 ### Universal invariants (always check, regardless of project)
 
-- The change builds / typechecks under the project's own toolchain.
+- The change builds / typechecks under the project's own toolchain. Run the config the project's build script actually uses (e.g. its app-specific `tsconfig.json`), not the raw compiler default — a bare invocation like `tsc --noEmit` can pull in tests or unrelated files and report pre-existing errors, giving a false gate.
 - New behavior has a test (per `test-first`). This is discipline, not project policy.
 - No left-behind debug artifacts; no public API broadened solely to enable testing.
 
