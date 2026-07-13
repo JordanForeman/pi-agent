@@ -11,11 +11,7 @@ detect:
 - Avoid destructive git operations (force push, reset --hard) without explicit confirmation.
 - Discarding a path with `git checkout HEAD -- <file>` (or `git restore`/`git checkout <branch> -- <file>`) overwrites the working tree with the target ref and **permanently destroys uncommitted edits** to that file — there is no reflog for unstaged changes. Before discarding, confirm the change is already committed or stashed; if in doubt, `git stash` or copy the file aside first. This footgun bites hardest mid-refactor, when the valuable edits are exactly the ones not yet committed.
 - When creating commits, write clear, conventional commit messages.
-- PR descriptions carry only what the diff and CI cannot say for themselves. Write *why the change exists and how to use it* — the intent, the key design decision, and a worked example where one aids comprehension. Keep it short; a smart reviewer should grasp the change on one read.
-  - Do NOT enumerate a file-by-file or bullet list of changes: that is what GitHub's "Files changed" tab is for, and the list rots the moment the diff moves.
-  - Do NOT add a "Testing" / "How I tested" section: running tests is presumed, and CI is a merge requirement — stating it is noise.
-  - Do NOT restate the diff in prose, pad with generic caveats, or narrate the process. Signal over ceremony.
-  - When updating an existing PR body, read it first, preserve its shape, and make minimal targeted edits — never overwrite manual edits with a regenerated dump.
+- Writing or updating a PR description is its own skill — see `pr-descriptions` (standards). Keep this skill to the git mechanics (commit, push, attribution).
 - Stage only the intended files. When asked to commit complete work, inspect untracked changes before leaving them out; include them, exclude them with rationale, or ask.
 - Quote file paths with spaces in git commands.
 - Never hand-merge generated files (schema dumps, lockfiles, codegen output) on a merge or rebase conflict. The correct resolution is to take one side wholesale, then regenerate the artifact from its source of truth so it reflects the combined state. Hand-editing generated output produces a file that matches neither input and silently drifts from what the generator would produce.
