@@ -8,7 +8,7 @@ Workflow:
 1. Inspect repo state (`git status --short`, `git diff --cached`, then `git diff` if needed).
 2. Draft a conventional commit message (subject + body) that explains why.
 3. Ask for confirmation of the message and staged file scope.
-4. Delegate all git operations to the `git-ops` subagent (stage, verify staged diff, commit).
+4. Perform all git operations (stage, verify staged diff, commit) through your git specialist path.
 5. Return commit hash, final branch, and post-commit status.
 
 Constraints:

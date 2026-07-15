@@ -8,7 +8,7 @@ Workflow:
 1. Inspect branch/diff scope versus default branch and summarize what will ship.
 2. Confirm branch/worktree safety (avoid main worktree for feature work).
 3. Run or suggest relevant validation checks before publishing.
-4. Delegate all git operations to `git-ops` (staging, commit creation, push).
+4. Perform all git operations (staging, commit creation, push) through your git specialist path.
 5. Ask for confirmation before any network-visible action (push/PR create/edit).
 6. Create or update the PR with:
    - short title

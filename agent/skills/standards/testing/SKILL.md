@@ -46,6 +46,10 @@ Default to real collaborators. The signal to reach for a mock is felt while writ
 
 - A test should fail for exactly one reason. When a test can fail for several unrelated causes, a failure tells you little about what broke.
 
+### A regression test must be proven against the pre-fix baseline
+
+When you add a test alongside a bug fix, prove it is a genuine guard, not a false positive. Validate it *differentially*: with the fix reverted, the test must **fail** on the baseline; with the fix reapplied, it must **pass**. A test that stays green with the fix removed asserts nothing about the bug — it would never catch the regression it claims to guard. Reverting the fix and watching the test fail is the only evidence that the test is load-bearing.
+
 ### Tests specify behavior; they are not the spec's enemy
 
 - Treat tests as specification feedback. When a test fails, verify the *expected behavior* before changing the test.
