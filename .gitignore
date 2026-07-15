@@ -15,3 +15,6 @@ agent/sessions/
 *.log
 *.tmp
 .DS_Store
+
+# Artifacts
+.pi-subagents/
