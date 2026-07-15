@@ -1,6 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { WorkflowEngine, type WorkflowDefinition } from "../../extension-core/workflow-engine";
 import { WorkflowExtensionCore } from "../../extension-core/workflow-extension-core";
+import { createSharedReviewPhase, createSharedReviewSynthesisPhase } from "../../extension-core/review-contract";
 
 const PR_REVIEW_WORKFLOW: WorkflowDefinition = {
   id: "pr-review",
@@ -25,91 +26,23 @@ const PR_REVIEW_WORKFLOW: WorkflowDefinition = {
       }],
       transition: { type: "advance" },
     },
-    {
-      id: "review",
-      label: "📋 Parallel review",
-      execution: "parallel",
-      tasks: [
-        {
-          agent: "design-reviewer",
-          task: [
-            "Review the current changes for architecture and design quality.",
-            "",
-            "Triage report (check if your review is applicable before proceeding):",
-            "{phase:triage}",
-          ].join("\n"),
-        },
-        {
-          agent: "rails-reviewer",
-          task: [
-            "Review the current changes for Ruby/Rails conventions and quality.",
-            "",
-            "Triage report (check if your review is applicable before proceeding):",
-            "{phase:triage}",
-          ].join("\n"),
-        },
-        {
-          agent: "frontend-reviewer",
-          task: [
-            "Review the current changes for frontend/React/TypeScript quality.",
-            "",
-            "Triage report (check if your review is applicable before proceeding):",
-            "{phase:triage}",
-          ].join("\n"),
-        },
-        {
-          agent: "testing-reviewer",
-          task: [
-            "Review the current changes for test quality and coverage.",
-            "",
-            "Triage report (check if your review is applicable before proceeding):",
-            "{phase:triage}",
-          ].join("\n"),
-        },
-        {
-          agent: "reviewer",
-          task: [
-            "Review the current changes for correctness, safety, and security.",
-            "",
-            "Pay special attention to:",
-            "- Injection risks (SQL, command, template, path traversal)",
-            "- Authentication and authorization bypasses",
-            "- Unsafe secret handling or logging of sensitive data",
-            "- Trust-boundary validation failures",
-            "- Data loss or corruption risks",
-            "",
-            "Triage report (check for security-sensitive and general concerns):",
-            "{phase:triage}",
-          ].join("\n"),
-        },
-      ],
-      transition: { type: "advance" },
-    },
-    {
-      id: "synthesize",
-      label: "📝 Synthesize review",
-      execution: "sequential",
-      tasks: [{
-        agent: "reviewer",
-        task: [
-          "Synthesize all review findings into a single, actionable review report.",
-          "",
-          "Produce:",
-          "1. **Summary verdict** — overall assessment of the changes",
-          "2. **Blockers** — issues that must be resolved before merge (if any)",
-          "3. **Non-blocking improvements** — suggestions ranked by impact",
-          "4. **Security findings** — any security concerns surfaced during review",
-          "5. **Go/no-go recommendation** with clear justification",
-          "",
-          "Deduplicate findings across reviewers. Attribute findings to the relevant",
-          "reviewer when it adds context, but focus on a coherent unified report.",
-          "",
-          "Review findings:",
-          "{context}",
-        ].join("\n"),
-      }],
-      transition: { type: "advance" },
-    },
+    createSharedReviewPhase({
+      review_context: [
+        "User review request: {input}",
+        "Triage report:",
+        "{phase:triage}",
+      ].join("\n"),
+    }),
+    createSharedReviewSynthesisPhase({
+      verdict_instructions: [
+        "Produce:",
+        "1. **Summary verdict** — overall assessment of the changes",
+        "2. **Blockers** — issues that must be resolved before merge (if any)",
+        "3. **Non-blocking improvements** — suggestions ranked by impact",
+        "4. **Security findings** — any security concerns surfaced during review",
+        "5. **Go/no-go recommendation** with clear justification",
+      ].join("\n"),
+    }),
   ],
 };
 

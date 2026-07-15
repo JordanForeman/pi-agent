@@ -12,7 +12,7 @@ const TDD_WORKFLOW: WorkflowDefinition = {
       label: "🔴 Write failing tests",
       execution: "sequential",
       tasks: [{
-        agent: "testing-reviewer",
+        agent: "builder",
         task: [
           "Write failing tests that specify the intended behavior for: {input}",
           "",
@@ -51,7 +51,7 @@ const TDD_WORKFLOW: WorkflowDefinition = {
       label: "🔵 Review & refactor",
       execution: "sequential",
       tasks: [{
-        agent: "reviewer",
+        agent: "builder",
         task: [
           "Review and refactor the implementation for clarity, maintainability, and design quality.",
           "",

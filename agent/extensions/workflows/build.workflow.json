@@ -1,0 +1,106 @@
+{
+  "description": "Plan, implement, review, fix, and re-review feature work with one writer",
+  "maxFixRounds": 3,
+  "phases": [
+    {
+      "id": "plan",
+      "label": "🧭 Plan scope and validation",
+      "execution": "sequential",
+      "tasks": [
+        {
+          "agent": "planner",
+          "skill": ["search-before-write", "validation-discovery"],
+          "lines": [
+            "Create a concise implementation plan for: {input}",
+            "",
+            "Include:",
+            "- scoped objective and non-goals",
+            "- likely edit surfaces and tests to inspect",
+            "- explicit acceptance criteria",
+            "- validation contract based on the project, not generic guesses",
+            "- risks or decisions that would require user approval",
+            "",
+            "Do not edit files."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "implement",
+      "label": "🛠️ Implement with one writer",
+      "execution": "sequential",
+      "contextMode": "compact",
+      "tasks": [
+        {
+          "agent": "builder",
+          "skill": ["search-before-write", "test-first", "validation-discovery", "avoid-over-engineering", "code-shape", "naming", "comments", "coupling", "error-signaling", "testing"],
+          "lines": [
+            "Implement the planned feature work for: {input}",
+            "",
+            "Plan and validation contract:",
+            "{phase:plan}",
+            "",
+            "Rules:",
+            "- You are the only writer for this implementation phase.",
+            "- Keep edits small, reversible, and inside the approved scope.",
+            "- Follow test-first discipline where applicable.",
+            "- Run the most focused validation available and report commands plus outcomes.",
+            "- Stop instead of guessing on product, scope, security, destructive, or externally visible ambiguity."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "fix",
+      "label": "🧹 Apply accepted fixes",
+      "execution": "sequential",
+      "contextMode": "compact",
+      "tasks": [
+        {
+          "agent": "builder",
+          "skill": ["search-before-write", "test-first", "validation-discovery", "avoid-over-engineering", "code-shape", "naming", "comments", "coupling", "error-signaling", "testing"],
+          "lines": [
+            "Apply only the accepted in-scope fixes from the synthesized review verdict.",
+            "",
+            "Original objective: {input}",
+            "Current review/fix context:",
+            "{context}",
+            "",
+            "Rules:",
+            "- You are the only writer for this fix phase.",
+            "- Do not apply optional/deferred feedback unless it is tiny, safe, and clearly inside scope.",
+            "- Do not make unapproved product, scope, security, destructive, or architecture decisions.",
+            "- Run focused validation for the fixes and report commands plus outcomes."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "finalize",
+      "label": "✅ Final summary",
+      "execution": "sequential",
+      "contextMode": "full",
+      "tasks": [
+        {
+          "agent": "reviewer",
+          "skill": ["concise-output"],
+          "lines": [
+            "Produce the final build summary for: {input}",
+            "Do not edit files.",
+            "Do not delegate to other subagents; use your available read-only tools directly.",
+            "",
+            "Workflow context:",
+            "{context}",
+            "",
+            "Include:",
+            "- final verdict and whether the work is ready for parent review",
+            "- changed files to inspect",
+            "- validation evidence and remaining validation gaps",
+            "- remaining blockers or deferred follow-ups",
+            "- fix rounds used"
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,110 @@
+{
+  "description": "Shared review contract for post-hoc review and build self-review",
+  "review": {
+    "id": "review",
+    "label": "🔎 Parallel review",
+    "execution": "parallel",
+    "contextMode": "compact",
+    "tasks": [
+      {
+        "agent": "design-reviewer",
+        "skill": ["api-design", "code-shape", "module-structure", "naming", "coupling", "comments"],
+        "lines": [
+          "Review the current changes for architecture and design quality.",
+          "If this review angle is not applicable to the current diff, say so briefly.",
+          "Do not edit files or run mutating commands.",
+          "Do not delegate to other subagents; use your available read-only tools directly.",
+          "Inspect the actual repository state and changed files directly.",
+          "Return only concrete issues with file-specific evidence, prioritizing changes worth fixing before completion.",
+          "",
+          "Review context:",
+          "{review_context}"
+        ]
+      },
+      {
+        "agent": "rails-reviewer",
+        "skill": ["ruby", "api-design", "code-shape", "naming", "coupling", "testing"],
+        "lines": [
+          "Review the current changes for Ruby/Rails conventions and quality.",
+          "If this review angle is not applicable to the current diff, say so briefly.",
+          "Do not edit files or run mutating commands.",
+          "Do not delegate to other subagents; use your available read-only tools directly.",
+          "Inspect the actual repository state and changed files directly.",
+          "Return only concrete issues with file-specific evidence, prioritizing changes worth fixing before completion.",
+          "",
+          "Review context:",
+          "{review_context}"
+        ]
+      },
+      {
+        "agent": "frontend-reviewer",
+        "skill": ["typescript", "frontend-aesthetics", "make-interfaces-feel-better", "api-design", "code-shape", "testing"],
+        "lines": [
+          "Review the current changes for frontend/React/TypeScript quality.",
+          "If this review angle is not applicable to the current diff, say so briefly.",
+          "Do not edit files or run mutating commands.",
+          "Do not delegate to other subagents; use your available read-only tools directly.",
+          "Inspect the actual repository state and changed files directly.",
+          "Return only concrete issues with file-specific evidence, prioritizing changes worth fixing before completion.",
+          "",
+          "Review context:",
+          "{review_context}"
+        ]
+      },
+      {
+        "agent": "testing-reviewer",
+        "skill": ["testing", "test-first", "validation-discovery"],
+        "lines": [
+          "Review the current changes for test quality, coverage, and validation against the stated acceptance criteria.",
+          "If this review angle is not applicable to the current diff, say so briefly.",
+          "Do not edit files or run mutating commands.",
+          "Do not delegate to other subagents; use your available read-only tools directly.",
+          "Inspect changed files and relevant tests directly.",
+          "Return missing tests, brittle tests, validation gaps, and the smallest fixes worth doing now.",
+          "",
+          "Review context:",
+          "{review_context}"
+        ]
+      },
+      {
+        "agent": "reviewer",
+        "skill": ["code-security", "code-shape", "naming", "comments", "coupling", "error-signaling"],
+        "lines": [
+          "Review the current changes for correctness, regressions, safety, and security.",
+          "Do not edit files or run mutating commands.",
+          "Do not delegate to other subagents; use your available read-only tools directly.",
+          "Inspect the actual repository state and changed files directly; do not rely on implementation summaries.",
+          "Pay special attention to injection risks, auth bypasses, unsafe secret handling, trust-boundary validation failures, and data loss/corruption risks.",
+          "Return evidence-backed findings with file paths. Distinguish blockers, fixes worth doing now, and optional/deferred nits.",
+          "",
+          "Review context:",
+          "{review_context}"
+        ]
+      }
+    ]
+  },
+  "synthesize": {
+    "id": "synthesize",
+    "label": "🧾 Synthesize review verdict",
+    "execution": "sequential",
+    "contextMode": "full",
+    "tasks": [
+      {
+        "agent": "reviewer",
+        "skill": ["concise-output"],
+        "lines": [
+          "Synthesize all review findings into a single actionable review report.",
+          "Do not edit files.",
+          "Do not delegate to other subagents; use your available read-only tools directly.",
+          "",
+          "{verdict_instructions}",
+          "",
+          "Deduplicate findings across reviewers. Attribute findings to the relevant reviewer when it adds context, but focus on a coherent unified report.",
+          "",
+          "Review findings:",
+          "{context}"
+        ]
+      }
+    ]
+  }
+}

@@ -79,17 +79,30 @@ Edit inside this repo, then apply Home Manager for the target machine:
 - Local always-on extensions: `agent/extensions/**`
 - Themes: `agent/themes/*.json`
 
-## Ralph v2 Workflow
+## Operational Workflows
 
-`/ralph:start <objective> --iterations N` runs a compact WorkflowEngine flow:
+Use `/build <objective>` for normal feature work. It runs a bounded in-flight implementation loop:
+
+```text
+planner → builder → parallel reviewers → synthesis → builder fix pass → re-review (max 3 fix rounds) → final summary
+```
+
+The loop keeps implementation and fix phases to a single writer (`builder`) while parallel review remains read-only. Review synthesis emits one of `BUILD_CLEAN`, `BUILD_FIXES_NEEDED`, or `BUILD_BLOCKED` to decide whether to fix, produce a blocked final summary for a user decision, or finalize cleanly.
+
+`/review` remains the post-hoc diff review command (`pr-review.ts`); it should not mutate files. Keep `/review` and `/build` separate: review reports on existing changes, build is allowed to create or revise changes through the review loop.
+
+The build-specific phase prompt/spec lives in `agent/extensions/workflows/build.workflow.json`; the shared review contract used by both `/build` and `/review` lives in `agent/extension-core/review.workflow.json`. `build.ts` only loads those specs and supplies transition logic. Phase tasks are already delegated to subagents by `WorkflowEngine`, and the JSON specs explicitly attach relevant standards/conventions skills to each phase.
+
+### Durable multi-increment mode (Ralph)
+
+`/ralph:start <objective> --iterations N` is the older durable multi-increment workflow:
 
 ```text
 ralph-groomer → ralph-worker (up to N sequential increments) → ralph-summarizer
 ```
 
-The parent Pi session only schedules phases and receives compact receipts/signals. Worker internals (planning, recon, implementation, validation, and history updates) stay inside `ralph-worker` and durable `.pi/ralph/` artifacts.
+Treat `/build` as the default operational paradigm for feature work. Use Ralph only when you explicitly want durable `.pi/ralph/` artifacts, a backlog/progress ledger, or multiple autonomous increments across a longer-running objective. The Ralph surface is a compatibility/long-running mode and should converge toward the same build vocabulary over time.
 
-Exposed commands are intentionally small: `/ralph:start`, `/ralph:status`, `/ralph:stop`, and `/ralph:report`. Start creates/updates required `.pi/ralph/` state automatically.
 ## Troubleshooting
 
 ### Agents not found

@@ -143,13 +143,15 @@ type EngineState = "idle" | "running" | "awaiting_phase" | "completed" | "failed
 // ── Engine ───────────────────────────────────────────────────────────────────
 
 export class WorkflowEngine {
+  private static activeEngine: WorkflowEngine | null = null;
+
   private context: WorkflowContext;
   private engineState: EngineState = "idle";
   private phaseStartTime = 0;
   private pendingTaskOutputs: TaskOutput[] = [];
   private expectedTaskCount = 0;
   private loopIterations: Record<string, number> = {};
-  private unsubscribers: Array<() => void> = [];
+  private listenersRegistered = false;
   private pendingTasks: PhaseTask[] = [];
 
   constructor(
@@ -168,8 +170,14 @@ export class WorkflowEngine {
       return;
     }
 
+    if (WorkflowEngine.activeEngine?.isActive()) {
+      if (ctx.hasUI) ctx.ui.notify("Another workflow is already running. Wait for it to complete before starting a new workflow.", "warning");
+      return;
+    }
+
     this.context = this.createInitialContext(input);
     this.engineState = "running";
+    WorkflowEngine.activeEngine = this;
     this.loopIterations = {};
     this.registerEventListeners();
 
@@ -200,6 +208,7 @@ export class WorkflowEngine {
     this.pendingTaskOutputs = [];
     this.pendingTasks = [];
     this.expectedTaskCount = 0;
+    if (WorkflowEngine.activeEngine === this) WorkflowEngine.activeEngine = null;
 
     if (ctx?.hasUI) {
       (ctx as { ui: ExtensionContext["ui"] }).ui.setStatus(`workflow-${this.definition.id}`, undefined);
@@ -230,7 +239,8 @@ export class WorkflowEngine {
   // ── Event listeners ──
 
   private registerEventListeners(): void {
-    this.cleanup();
+    if (this.listenersRegistered) return;
+    this.listenersRegistered = true;
 
     // Inject phase instructions into system prompt
     this.pi.on("before_agent_start", (event, ctx) => this.onBeforeAgentStart(event, ctx));
@@ -240,11 +250,6 @@ export class WorkflowEngine {
 
     // Detect end of agent turn — evaluate transitions
     this.pi.on("agent_end", (_event, ctx) => this.onAgentEnd(ctx));
-  }
-
-  private cleanup(): void {
-    // Pi's event system doesn't provide unsubscribe from on(), so we track state instead.
-    // When engineState is idle/completed/failed, handlers no-op.
   }
 
   private onBeforeAgentStart(
@@ -367,6 +372,11 @@ export class WorkflowEngine {
 
     switch (transition.type) {
       case "advance": {
+        if (result.status === "failed") {
+          this.finish(ctx, "failed", `Phase "${phase.label}" failed.`);
+          break;
+        }
+
         const nextPhase = this.getNextPhase(phase.id);
         if (nextPhase) {
           this.enterPhase(nextPhase.id, ctx);
@@ -414,6 +424,7 @@ export class WorkflowEngine {
   private finish(ctx: ExtensionContext, status: "completed" | "failed", error?: string): void {
     this.engineState = status;
     this.context.currentPhase = null;
+    if (WorkflowEngine.activeEngine === this) WorkflowEngine.activeEngine = null;
 
     if (ctx.hasUI) {
       if (status === "completed") {
