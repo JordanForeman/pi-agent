@@ -1,7 +1,9 @@
 ---
 name: naming
 description: Authoring or editing code where names (variables, methods, classes, files) carry the design intent
-injection: always
+injection: detect
+detect:
+  mode: write
 ---
 
 Names are the primary carrier of intent. A reader should understand *what* code does and *why* from names alone — without parsing implementation or leaning on comments. This is the always-on floor of code taste: every identifier you write is a naming decision.

@@ -1,7 +1,9 @@
 ---
 name: code-shape
 description: Authoring or editing functions/methods where the body's structure and level of abstraction determine readability
-injection: always
+injection: detect
+detect:
+  mode: write
 ---
 
 Methods are sentences. Each method should operate at one consistent level of abstraction and read as a sequence of named steps. This is always-on taste: any function you write has a shape, and shape is the difference between code that's read and code that's deciphered.

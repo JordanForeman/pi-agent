@@ -1,7 +1,9 @@
 ---
 name: comments
 description: Authoring or editing code where the question arises of whether prose earns its place — inline comments, file/class headers, TODOs
-injection: always
+injection: detect
+detect:
+  mode: write
 ---
 
 Comment the *why*, name the *what*. Prose in code is the carrier of last resort: it exists for intent the code genuinely cannot carry itself. As an AI author, your default disposition is *less* prose, not more — well-intentioned verbosity is still noise.
