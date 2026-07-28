@@ -37,4 +37,10 @@ Default limits unless the user asks for depth:
 - Validation summaries: command + pass/fail + one relevant detail.
 - Code-location explanations: concise sentence plus `file_path:line_number`.
 
+Sentence hygiene (gentle default, everywhere):
+- Prefer active voice and present tense.
+- One instruction per sentence in anything procedural.
+- One word, one meaning — pick a term for a concept and reuse it; don't rotate synonyms to sound varied.
+- These are defaults, not gates: if a rule fights legibility for a given sentence, legibility wins. For durable authored artifacts (PRs, docs, runbooks, comments, issues), the stricter controlled-English discipline lives in the `technical-english` standard.
+
 This applies to assistant prose. It does not apply to code, diffs, or exact tool output that must be preserved.
