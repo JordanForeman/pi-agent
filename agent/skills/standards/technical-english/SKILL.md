@@ -46,6 +46,6 @@ An artifact can be accurate and still fail its reader. When prose reads as dense
 
 These standards govern the **published artifact body**, not only the summary you write about it in chat. When feedback lands on "this is too verbose," confirm which artifact is meant before revising.
 
-Avoid the tells of generated prose. The em-dash is the loudest: prefer a colon after a bolded label lead-in, and a period or comma where an em-dash was doing a clause's work. A reader who thinks "this looks machine-written" has stopped reading the content.
+Avoid the tells of generated prose. The em-dash is the loudest: where one is doing a label's or a clause's work, a colon, comma, or period usually reads better. Treat this as a preference applied to new prose, not a mandate to sweep existing text — a reader who thinks "this looks machine-written" has stopped reading the content.
 
 If a rule here fights legibility for a specific sentence, legibility wins — same tie-breaker as `concise-output`.

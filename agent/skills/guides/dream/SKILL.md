@@ -188,9 +188,25 @@ one. Produce minimal, surgical edits — never blank-slate a skill file.
      the two pointers, where neither a forward nor a backfill run can ever reach
      them. In that case also set `floor` ← the **lowest timestamp processed this
      run**. The remainder then falls below `floor`, and the next backfill run
-     picks it up newest-first. This re-walks some already-processed history,
-     which costs a little duplicated work; stranding loses those sessions
-     permanently. Prefer the re-walk.
+     picks it up newest-first.
+
+     This raises `floor`, so `floor` is **not monotonically decreasing**: it
+     ratchets up on a capped forward run and walks back down on backfill runs.
+     Net drainage is still downward over time, but not on every run.
+
+     The re-walk is not cheap — price it before assuming it is free. Every
+     session between the old `floor` and the new one becomes backfill-eligible
+     again, and that set is usually far larger than the remainder you rescued.
+     Report the ratio in the run output. Take the re-walk anyway: duplicated work
+     is recoverable, stranding is not.
+
+     **Re-walked sessions must not manufacture recurrence.** Phase 2 promotes a
+     candidate when a pattern recurs across sessions, and re-ingesting already-
+     processed history fabricates exactly that signal from learnings that are
+     already codified. Before recurrence can qualify a candidate, confirm the
+     supporting sessions are distinct from those a previous run already landed —
+     check the target skill for the learning first (Phase 4), and treat a
+     recurrence built only on re-walked sessions as a SKIP.
    Keep `version: 2` and the `{cursor, floor}` object shape. Set `last_dream` to
    the current ISO date. Skip a profile entirely if it had no work this run.
 3. Run the taxonomy validator and stop on any error:
