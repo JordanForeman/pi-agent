@@ -178,8 +178,19 @@ one. Produce minimal, surgical edits — never blank-slate a skill file.
      processed). If no forward sessions were processed, leave `cursor` unchanged.
    - `floor` ← on first run, the **min** timestamp processed; on a backfill run,
      the **lowest** backfill timestamp processed (drives the old edge downward).
-     If only forward sessions were processed on a non-first run, leave `floor`
+     If only forward sessions were processed on a non-first run **and the forward
+     sweep drained completely** (nothing left beyond the cap), leave `floor`
      unchanged.
+   - **Capped forward sweep — the stranding case.** If forward sessions remain
+     beyond the cap, you processed a contiguous band off the *top* of the forward
+     set, not the whole set. Advancing `cursor` to the top of that band while
+     leaving `floor` below the unprocessed remainder traps those sessions between
+     the two pointers, where neither a forward nor a backfill run can ever reach
+     them. In that case also set `floor` ← the **lowest timestamp processed this
+     run**. The remainder then falls below `floor`, and the next backfill run
+     picks it up newest-first. This re-walks some already-processed history,
+     which costs a little duplicated work; stranding loses those sessions
+     permanently. Prefer the re-walk.
    Keep `version: 2` and the `{cursor, floor}` object shape. Set `last_dream` to
    the current ISO date. Skip a profile entirely if it had no work this run.
 3. Run the taxonomy validator and stop on any error:

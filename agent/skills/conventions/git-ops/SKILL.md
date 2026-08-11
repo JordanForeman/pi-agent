@@ -13,6 +13,8 @@ detect:
 - When creating commits, write clear, conventional commit messages.
 - Writing or updating a PR description is its own skill — see `pr-descriptions` (standards). Keep this skill to the git mechanics (commit, push, attribution).
 - Stage only the intended files. When asked to commit complete work, inspect untracked changes before leaving them out; include them, exclude them with rationale, or ask.
+- Keep the diff to substantive changes. Revert incidental formatter rewraps on lines you did not otherwise touch, and stash unrelated working-tree churn (lockfiles, generated output) before committing or amending. A reviewer should see only the change you are asking about.
+- Commit and push is the final step of the work, not a separate request. When asked to make a change, carry it through to pushed — do not stop to confirm.
 - Quote file paths with spaces in git commands.
 - Never hand-merge generated files (schema dumps, lockfiles, codegen output) on a merge or rebase conflict. The correct resolution is to take one side wholesale, then regenerate the artifact from its source of truth so it reflects the combined state. Hand-editing generated output produces a file that matches neither input and silently drifts from what the generator would produce.
 - In non-interactive automation, git commands that open an editor (`rebase --continue`, `commit --amend`, `merge` without `-m`) hang waiting on a UI that never appears. Run them with `GIT_EDITOR=true` (and `GIT_SEQUENCE_EDITOR=true` for interactive rebase) so they accept the existing message and proceed.
