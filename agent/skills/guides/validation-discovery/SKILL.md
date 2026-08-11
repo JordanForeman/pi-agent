@@ -20,8 +20,9 @@ When validating a change, **discover the project's own validation contract — d
 - The change builds / typechecks under the project's own toolchain. Run the config the project's build script actually uses (e.g. its app-specific `tsconfig.json`), not the raw compiler default — a bare invocation like `tsc --noEmit` can pull in tests or unrelated files and report pre-existing errors, giving a false gate.
 - New behavior has a test (per `test-first`). This is discipline, not project policy.
 - No left-behind debug artifacts; no public API broadened solely to enable testing.
+- Time-box local validation. When reproducing a check locally would cost more than the signal is worth — an environment that needs long setup, a toolchain that needs provisioning — push and let CI provide it. Bound any long-running command with an explicit timeout and redirect its output to a log file, so a stalled step is visible rather than silently consuming the session.
 
-When validation exposes unrelated environment drift or pre-existing failures, separate that from the targeted result for the touched code. Report both; do not let ambient drift erase a meaningful targeted pass, and do not call the whole project green.
+When validation exposes unrelated environment drift or pre-existing failures, separate that from the targeted result for the touched code. Report both; do not let ambient drift erase a meaningful targeted pass, and do not call the whole project green. When a repo-wide check is drowned in pre-existing noise, prove the contract with a minimal config scoped to the changed subtree rather than abandoning verification.
 
 ### Honest abstention
 

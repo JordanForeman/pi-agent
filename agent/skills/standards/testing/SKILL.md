@@ -50,6 +50,8 @@ Default to real collaborators. The signal to reach for a mock is felt while writ
 
 When you add a test alongside a bug fix, prove it is a genuine guard, not a false positive. Validate it *differentially*: with the fix reverted, the test must **fail** on the baseline; with the fix reapplied, it must **pass**. A test that stays green with the fix removed asserts nothing about the bug — it would never catch the regression it claims to guard. Reverting the fix and watching the test fail is the only evidence that the test is load-bearing.
 
+The same proof applies to a test written for *new* code, not only for a fix. Temporarily break the production path the test claims to cover, confirm the test goes red, then restore. Until you have seen it fail for the right reason, you have a test that passes — not a test that guards.
+
 ### Tests specify behavior; they are not the spec's enemy
 
 - Treat tests as specification feedback. When a test fails, verify the *expected behavior* before changing the test.

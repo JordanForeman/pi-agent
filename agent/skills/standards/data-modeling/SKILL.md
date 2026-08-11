@@ -11,6 +11,7 @@ A data model is a set of promises about what can happen to a fact once it's reco
 - Interrogate the concept before choosing columns. What *is* this thing — an event that happened, a mutable current state, or a projection of other facts? The answer dictates the shape.
 - A field that holds categorically different kinds of values (a status *and* a computed result in one column) is a modeling failure wearing a schema. Separate the concepts; don't union them into one slot.
 - Prefer honest shapes: a bare domain type and a truthful "absent" over wrapper objects or null-objects that quietly swallow the difference between *empty* and *unknown*. Absence should be legible, not disguised.
+- A field added during a migration must stay optional until every consumer opts in. Making it required while legacy callers still exist converts a rollout into an outage; tighten the contract only once the last consumer has moved.
 
 ### Reversibility is a deliberate decision, not an accident
 

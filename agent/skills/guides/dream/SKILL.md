@@ -71,7 +71,9 @@ open dream PR. You want to avoid re-proposing things already learned.
 Each profile's state is `{ "cursor": <iso8601>, "floor": <iso8601> }`:
 
 - **`cursor`** = highest timestamp already processed (the *new* edge).
-- **`floor`** = lowest timestamp processed contiguously (the *old* edge).
+- **`floor`** = low-water mark of the most recent sweep that moved it (the *old*
+  edge). It is not monotonically decreasing — a backfill run walks it down, a
+  capped forward run ratchets it up (see Phase 5).
 
 The cap is `MAX_SESSIONS_PER_RUN = 40` (total across both profiles).
 
@@ -178,8 +180,35 @@ one. Produce minimal, surgical edits — never blank-slate a skill file.
      processed). If no forward sessions were processed, leave `cursor` unchanged.
    - `floor` ← on first run, the **min** timestamp processed; on a backfill run,
      the **lowest** backfill timestamp processed (drives the old edge downward).
-     If only forward sessions were processed on a non-first run, leave `floor`
+     If only forward sessions were processed on a non-first run **and the forward
+     sweep drained completely** (nothing left beyond the cap), leave `floor`
      unchanged.
+   - **Capped forward sweep — the stranding case.** If forward sessions remain
+     beyond the cap, you processed a contiguous band off the *top* of the forward
+     set, not the whole set. Advancing `cursor` to the top of that band while
+     leaving `floor` below the unprocessed remainder traps those sessions between
+     the two pointers, where neither a forward nor a backfill run can ever reach
+     them. In that case also set `floor` ← the **lowest timestamp processed this
+     run**. The remainder then falls below `floor`, and the next backfill run
+     picks it up newest-first.
+
+     This raises `floor`, so `floor` is **not monotonically decreasing**: it
+     ratchets up on a capped forward run and walks back down on backfill runs.
+     Net drainage is still downward over time, but not on every run.
+
+     The re-walk is not cheap — price it before assuming it is free. Every
+     session between the old `floor` and the new one becomes backfill-eligible
+     again, and that set is usually far larger than the remainder you rescued.
+     Report the ratio in the run output. Take the re-walk anyway: duplicated work
+     is recoverable, stranding is not.
+
+     **Re-walked sessions must not manufacture recurrence.** Phase 2 promotes a
+     candidate when a pattern recurs across sessions, and re-ingesting already-
+     processed history fabricates exactly that signal from learnings that are
+     already codified. Before recurrence can qualify a candidate, confirm the
+     supporting sessions are distinct from those a previous run already landed —
+     check the target skill for the learning first (Phase 4), and treat a
+     recurrence built only on re-walked sessions as a SKIP.
    Keep `version: 2` and the `{cursor, floor}` object shape. Set `last_dream` to
    the current ISO date. Skip a profile entirely if it had no work this run.
 3. Run the taxonomy validator and stop on any error:
@@ -206,7 +235,9 @@ DROPs with their rationale so the audit trail is visible. Never push to `main`.
 A concise summary: count of sessions analyzed per profile (and whether each was
 forward or backfill), learnings proposed (with targets), drops (with reasons),
 the **pending count** per profile if the cap was hit (so Jordan knows to re-run),
-and the PR URL (or "amended existing dream PR"). If nothing new: say so and stop.
+the **re-walk ratio** if the floor ratcheted this run (sessions re-exposed vs.
+sessions rescued), and the PR URL (or "amended existing dream PR"). If nothing
+new: say so and stop.
 
 ## Headless / cron note
 
