@@ -71,7 +71,9 @@ open dream PR. You want to avoid re-proposing things already learned.
 Each profile's state is `{ "cursor": <iso8601>, "floor": <iso8601> }`:
 
 - **`cursor`** = highest timestamp already processed (the *new* edge).
-- **`floor`** = lowest timestamp processed contiguously (the *old* edge).
+- **`floor`** = low-water mark of the most recent sweep that moved it (the *old*
+  edge). It is not monotonically decreasing — a backfill run walks it down, a
+  capped forward run ratchets it up (see Phase 5).
 
 The cap is `MAX_SESSIONS_PER_RUN = 40` (total across both profiles).
 
@@ -233,7 +235,9 @@ DROPs with their rationale so the audit trail is visible. Never push to `main`.
 A concise summary: count of sessions analyzed per profile (and whether each was
 forward or backfill), learnings proposed (with targets), drops (with reasons),
 the **pending count** per profile if the cap was hit (so Jordan knows to re-run),
-and the PR URL (or "amended existing dream PR"). If nothing new: say so and stop.
+the **re-walk ratio** if the floor ratcheted this run (sessions re-exposed vs.
+sessions rescued), and the PR URL (or "amended existing dream PR"). If nothing
+new: say so and stop.
 
 ## Headless / cron note
 
