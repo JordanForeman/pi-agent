@@ -34,6 +34,15 @@ This governs **authored artifacts**, not conversational reasoning. Do not force 
 - **Use a vertical list** for a sequence of steps or a set of conditions. Do not bury a multi-part condition inside one sentence.
 - **Lead with the outcome or the action**, then the detail. Same instinct as `concise-output`'s answer-first shape.
 
+### Quotation is a factual claim
+
+When you put text inside quote marks, you assert it appears that way in the source. Verify the string verbatim before publishing it.
+
+- Speech is disfluent. Smoothing filler and false starts produces a cleaner sentence that the person never said. Label it as a paraphrase or a summary instead of quoting it.
+- Splicing across a gap needs an ellipsis. Joining two halves of a sentence and dropping the words between them changes what was said.
+- A garbled or ambiguous term in a transcript stays marked unresolved. A confident-sounding decoding written into a durable note becomes fact to every later reader, and the plausible reading is often the wrong one.
+- A document's creation time is not the event's time. Deriving a sequence of events from artifact timestamps invents a narrative the artifacts do not support.
+
 ### Where this lands
 
 - **PR descriptions / commit bodies** — pair with `pr-descriptions`, which owns what to include and exclude. This skill governs the prose style of what remains.

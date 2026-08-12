@@ -132,6 +132,27 @@ reads its one transcript in an isolated context and returns only a small
 `DREAM_INGEST` block (≤~400 tokens) of candidate learnings. You collect those
 blocks — never the raw transcripts.
 
+**Budget every child, and gate every wave.** An ingestor given no limit explores
+until it hits the harness timeout. Several doing that at once can outlive this
+session's turn-tracking window and destroy the turn — which loses the completed
+siblings' blocks too, because their only copy was the tool results in that turn.
+So: state a hard tool-call budget and a stop rule in each task ("at most N
+bounded passes, do not iterate, output only the block"), pilot the task shape on
+one or two transcripts before committing the batch, and check each wave's
+success rate before dispatching the next. A wave that degrades is a signal to
+shrink or stop, not to push on.
+
+**Before re-ingesting, check whether the blocks already exist.** A run that died
+after the map step may have left its `DREAM_INGEST` output in long-term memory
+even though the transcript's tool results are gone. Recall first (Phase 0) and
+reuse what you find; re-running the map to rebuild blocks you already hold costs
+hours and risks repeating the same failure. Rescue beats re-run.
+
+If a prior `/dream` transcript is itself in the work set, ingest it normally —
+it is a session like any other, and a completed run's own review cycle is a
+genuine source of process learnings. Only the *currently running* session is
+excluded, because it is still being written.
+
 Then **reduce**: synthesize across all returned candidate blocks. This is where
 cross-session signal emerges (the same correction or preference surfacing in
 multiple `DREAM_INGEST` outputs). A candidate qualifies for the next phase only
