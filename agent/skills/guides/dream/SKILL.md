@@ -101,18 +101,37 @@ new sessions immediately *and* lets backfill runs drain the old backlog over
 subsequent nights — nothing is ever permanently excluded.
 
 A reference enumerator (read-only; print profile, timestamp, id, path — sorted
-newest-first). It keys on the header `timestamp`, **not** the `id`:
+newest-first). It keys on the header `timestamp`, **not** the `id`. Note that the
+session header is **not reliably line 1** — a `title` record can precede it — so
+scan the first few lines for the record whose `type` is `session`:
 
 ```bash
 for prof in agent agent-shopify; do
   find "$HOME/.pi/$prof/sessions" -type f -name '*.jsonl' \
     ! -path '*/run-*/*' 2>/dev/null | while read -r f; do
-      read -r ts id < <(head -1 "$f" | python3 -c \
-        'import sys,json;h=json.load(sys.stdin);print(h.get("timestamp",""),h.get("id",""))' 2>/dev/null)
-      [ -n "$ts" ] && printf '%s\t%s\t%s\t%s\n' "$prof" "$ts" "$id" "$f"
+      read -r ts id < <(head -5 "$f" | python3 -c '
+import sys, json
+for line in sys.stdin:
+    try: h = json.loads(line)
+    except Exception: continue
+    if h.get("type") == "session" and h.get("timestamp"):
+        print(h["timestamp"], h.get("id", "")); break
+' 2>/dev/null)
+      if [ -n "$ts" ]; then
+        printf '%s\t%s\t%s\t%s\n' "$prof" "$ts" "$id" "$f"
+      else
+        printf 'UNPARSEABLE\t%s\n' "$f" >&2
+      fi
   done
 done | sort -t$'\t' -k2 -r
 ```
+
+**Count what you enumerated and reconcile it against the file count.** A parser
+that drops a transcript it cannot read produces a work set that looks complete,
+and the sessions it dropped land between the two pointers where neither a
+forward run nor a backfill run will ever reach them. Never let an unreadable
+header fail silently: report it, and fall back to the filename prefix, which
+carries the same timestamp.
 
 ## Phase 2 — Ingest transcripts via subagents (map step)
 
@@ -202,8 +221,18 @@ one. Produce minimal, surgical edits — never blank-slate a skill file.
    - `floor` ← on first run, the **min** timestamp processed; on a backfill run,
      the **lowest** backfill timestamp processed (drives the old edge downward).
      If only forward sessions were processed on a non-first run **and the forward
-     sweep drained completely** (nothing left beyond the cap), leave `floor`
-     unchanged.
+     sweep drained completely** (nothing left beyond the cap, and nothing skipped
+     mid-band), leave `floor` unchanged.
+   - **Reconcile the band before you advance anything.** "Drained completely"
+     means every session between the old `cursor` and the new one was actually
+     ingested — not merely that the cap was not hit. A transcript dropped by a
+     parse failure, an unreadable header, or a skipped-as-trivial judgment leaves
+     a hole *inside* the band, and advancing `cursor` past it strands it where
+     neither pointer reaches. The ratchet below does not rescue an interior hole,
+     because raising `floor` to the run's minimum still leaves the hole above it.
+     Count the sessions you enumerated, the ones you dispatched, and the ones
+     that returned; if those numbers disagree, either ingest the difference or
+     hold `cursor` at the last session before the gap.
    - **Capped forward sweep — the stranding case.** If forward sessions remain
      beyond the cap, you processed a contiguous band off the *top* of the forward
      set, not the whole set. Advancing `cursor` to the top of that band while
