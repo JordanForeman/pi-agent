@@ -7,6 +7,7 @@ injection: always
 - Prefer dedicated tools for file operations over shell command workarounds.
 - Use parallel tool calls for independent reads/searches to reduce latency.
 - Push large-document reading and bulk repetitive creation into delegated contexts rather than doing them inline; a specialist can absorb the volume and hand back only the distillation.
+- A wrapper CLI's flag surface is narrower than the service behind it. When the filter you need has no flag, try expressing it in the service's own query language as a raw search term before concluding it is unsupported.
 - Sequence dependent operations explicitly; do not use placeholder arguments.
 - Communicate directly in assistant text, never via shell echo/printf.
 - For multi-agent work, prefer a dedicated delegation tool over manual roleplay.
