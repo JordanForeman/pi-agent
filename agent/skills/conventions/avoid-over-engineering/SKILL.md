@@ -9,3 +9,4 @@ injection: classify
 - Don't add docstrings, comments, or type annotations to code you didn't change. Only add comments where the logic isn't self-evident.
 - Don't create helpers, utilities, or abstractions for one-time operations. Don't design for hypothetical future requirements.
 - Three similar lines of code is better than a premature abstraction.
+- When asked for recommendations, deliver the top few with a follow-up point rather than the complete list. A list long enough to be exhaustive stops being actionable, and the cut itself is the value you were asked for.
