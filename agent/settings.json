@@ -27,10 +27,10 @@
     "gemini-*"
   ],
   "prompts": [
-    "../agent/prompts/guides",
-    "../agent/prompts/conventions",
-    "../agent/prompts/formats",
-    "../agent/prompts/standards"
+    "../agent/prompts/ship",
+    "../agent/prompts/analyze",
+    "../agent/prompts/plan",
+    "../agent/prompts/learn"
   ],
   "skills": [
     "../agent/skills/guides",

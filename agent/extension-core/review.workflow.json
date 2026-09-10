@@ -8,6 +8,7 @@
     "tasks": [
       {
         "agent": "design-reviewer",
+        "requires": ["shell"],
         "skill": ["api-design", "code-shape", "module-structure", "naming", "coupling", "comments"],
         "lines": [
           "Review the current changes for architecture and design quality.",
@@ -23,6 +24,7 @@
       },
       {
         "agent": "rails-reviewer",
+        "requires": ["shell"],
         "skill": ["ruby", "api-design", "code-shape", "naming", "coupling", "testing"],
         "lines": [
           "Review the current changes for Ruby/Rails conventions and quality.",
@@ -38,6 +40,7 @@
       },
       {
         "agent": "frontend-reviewer",
+        "requires": ["shell"],
         "skill": ["typescript", "frontend-aesthetics", "make-interfaces-feel-better", "api-design", "code-shape", "testing"],
         "lines": [
           "Review the current changes for frontend/React/TypeScript quality.",
@@ -53,6 +56,7 @@
       },
       {
         "agent": "testing-reviewer",
+        "requires": ["shell"],
         "skill": ["testing", "test-first", "validation-discovery"],
         "lines": [
           "Review the current changes for test quality, coverage, and validation against the stated acceptance criteria.",
@@ -68,6 +72,7 @@
       },
       {
         "agent": "reviewer",
+        "requires": ["shell"],
         "skill": ["code-security", "code-shape", "naming", "comments", "coupling", "error-signaling"],
         "lines": [
           "Review the current changes for correctness, regressions, safety, and security.",
@@ -91,6 +96,7 @@
     "tasks": [
       {
         "agent": "reviewer",
+        "requires": [],
         "skill": ["concise-output"],
         "lines": [
           "Synthesize all review findings into a single actionable review report.",

@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   WorkflowEngine,
+  type PhaseCapability,
   type PhaseContextMode,
   type PhaseExecution,
   type PhaseResult,
@@ -19,6 +20,7 @@ type BuildVerdict = "BUILD_CLEAN" | "BUILD_FIXES_NEEDED" | "BUILD_BLOCKED";
 
 type BuildTaskSpec = {
   agent: string;
+  requires: PhaseCapability[];
   skill?: string[];
   lines: string[];
 };
@@ -126,9 +128,20 @@ function validateTaskSpec(value: unknown, phaseIndex: number, taskIndex: number)
 
   return {
     agent: asString(task.agent, `phases[${phaseIndex}].tasks[${taskIndex}].agent`),
+    requires: asCapabilities(task.requires, `phases[${phaseIndex}].tasks[${taskIndex}].requires`),
     skill,
     lines,
   };
+}
+
+function asCapabilities(value: unknown, label: string): PhaseCapability[] {
+  return asArray(value, label).map((item, index) => {
+    const capability = asString(item, `${label}[${index}]`);
+    if (capability !== "filesystem-write" && capability !== "shell") {
+      throw new Error(`build.workflow.json: ${label}[${index}] is invalid`);
+    }
+    return capability;
+  });
 }
 
 function asRecord(value: unknown, label: string): Record<string, unknown> {
@@ -176,6 +189,7 @@ function fixRounds(context: WorkflowContext): number {
 function templateTasks(tasks: BuildTaskSpec[]): PhaseTask[] {
   return tasks.map((task) => ({
     agent: task.agent,
+    requires: task.requires,
     task: task.lines.join("\n"),
     ...(task.skill ? { skill: task.skill } : {}),
   }));

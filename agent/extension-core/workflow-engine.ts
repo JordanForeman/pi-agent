@@ -3,12 +3,14 @@ import type {
   ExtensionCommandContext,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
+import { normalizeSubagentCompletions } from "./subagent-completions.mjs";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
 /** How a phase executes its tasks */
 export type PhaseExecution = "sequential" | "parallel";
 export type PhaseContextMode = "full" | "compact" | "file-only" | "none";
+export type PhaseCapability = "filesystem-write" | "shell";
 
 export interface WorkflowContextBudget {
   /** Max characters kept for one compacted subagent output */
@@ -55,6 +57,8 @@ export interface PhaseTask {
   skill?: string[];
   /** Optional name used in receipts when a tool result does not include the agent */
   label?: string;
+  /** Capabilities the selected agent must declare; validated statically by repository tooling */
+  requires: PhaseCapability[];
 }
 
 /** Definition of one workflow phase */
@@ -273,20 +277,23 @@ export class WorkflowEngine {
     const phase = this.definition.phases.find((p) => p.id === this.context.currentPhase);
     if (!phase) return;
 
-    const rawOutput = extractResultText(event.result);
-    const taskIndex = this.pendingTaskOutputs.length;
-    const task = this.pendingTasks[taskIndex];
-    const agent = extractAgentName(event.result) ?? this.fallbackAgentName(phase, task) ?? "unknown";
-    this.pendingTaskOutputs.push(
-      this.compactTaskOutput({
-        phase,
-        task,
-        rawOutput,
-        agent,
-        status: event.isError ? "error" : "success",
-        toolResult: event.result,
-      }),
-    );
+    const remainingTaskCount = this.expectedTaskCount - this.pendingTaskOutputs.length;
+    const completions = normalizeSubagentCompletions(event.result, event.isError, remainingTaskCount);
+    if (completions.length === 0) return;
+
+    for (const completion of completions) {
+      // A batch may contain more results than this phase requested.
+      if (this.pendingTaskOutputs.length >= this.expectedTaskCount) break;
+      const task = this.pendingTasks[this.pendingTaskOutputs.length];
+      this.pendingTaskOutputs.push(
+        this.compactTaskOutput({
+          ...completion,
+          phase,
+          task,
+          agent: completion.agent ?? this.fallbackAgentName(phase, task) ?? "unknown",
+        }),
+      );
+    }
 
     this.updatePhaseProgress();
   }
@@ -671,36 +678,6 @@ const DEFAULT_CONTEXT_BUDGET: WorkflowContextBudget = {
 };
 
 
-function extractResultText(result: unknown): string {
-  if (typeof result === "string") return result;
-  if (result && typeof result === "object") {
-    // The subagent tool result structure varies; extract text content
-    const r = result as Record<string, unknown>;
-    if (typeof r.text === "string") return r.text;
-    if (typeof r.content === "string") return r.content;
-    if (Array.isArray(r.content)) {
-      return r.content
-        .filter((c: unknown) => c && typeof c === "object" && (c as Record<string, unknown>).type === "text")
-        .map((c: unknown) => (c as Record<string, string>).text)
-        .join("\n");
-    }
-    // Fallback: stringify
-    try {
-      return JSON.stringify(result, null, 2);
-    } catch {
-      return String(result);
-    }
-  }
-  return String(result ?? "");
-}
-
-function extractAgentName(result: unknown): string | null {
-  if (result && typeof result === "object") {
-    const r = result as Record<string, unknown>;
-    if (typeof r.agent === "string") return r.agent;
-  }
-  return null;
-}
 function normalizeSummary(summary: string | OutputSummary | undefined): OutputSummary {
   if (typeof summary === "string") return { summary };
   return summary ?? {};
@@ -760,8 +737,12 @@ function extractArtifactPath(result: unknown): string | null {
 
   if (result && typeof result === "object") {
     const r = result as Record<string, unknown>;
-    for (const key of ["artifactPath", "outputPath", "path"]) {
+    for (const key of ["artifactPath", "savedOutputPath", "outputPath", "path"]) {
       if (typeof r[key] === "string") return r[key];
+    }
+    if (r.artifactPaths && typeof r.artifactPaths === "object") {
+      const outputPath = (r.artifactPaths as Record<string, unknown>).outputPath;
+      if (typeof outputPath === "string") return outputPath;
     }
     if (typeof r.text === "string") return extractArtifactPath(r.text);
     if (typeof r.content === "string") return extractArtifactPath(r.content);

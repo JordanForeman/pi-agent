@@ -43,6 +43,38 @@ agent/
 └── keybindings.json
 ```
 
+## Capability layers and discovery
+
+The repository keeps four concerns separate:
+
+- **Guidance** lives in `agent/skills/` and supplies contextual engineering judgment.
+- **Invocation** lives in thin `agent/prompts/` templates.
+- **Execution** lives in `agent/subagents/` and lifecycle-managed workflow extensions.
+- **Evidence** uses the explicit `evidence-report` format to distinguish direct observations from gaps.
+
+User-facing prompts are grouped by intent:
+
+- Analyze: `/arch`, `/why`, `/blast-radius`, `/skill-eval`, and `/review`
+- Plan: `/plan` and `/triage`
+- Ship: `/quick-commit`, `/quick-pr`, and `/verify`
+- Learn: `/learn`
+
+The added guides are also explicitly invocable as `/skill:design-rationale`, `/skill:blast-radius`, and `/skill:skill-evaluation`; use `/skill:evidence-report` when composing a custom evidence-bearing task. Prompt templates that depend on these guides pass a complete explicit skill array to their child role.
+
+Executable workflows are `/build`, `/tdd`, `/triage`, and `/review`; each has a corresponding `:status` command. Pi gives extension commands precedence over same-named prompt templates, so the `/review` and `/triage` workflow commands win their command-name collisions while those extensions are loaded. Physical prompt paths are canonicalized, so loading this package and the corrected dotfiles category paths does not register the same file twice.
+
+To inspect the live inventories:
+
+```bash
+find agent/skills -type f -name SKILL.md -print | sort
+find agent/prompts -mindepth 2 -maxdepth 2 -type f -name '*.md' -print | sort
+# Ordinary agents (exclude chains and the directory README)
+find agent/subagents -maxdepth 1 -type f -name '*.md' ! -name '*.chain.md' ! -name 'README.md' -print | sort
+# Chains are a separate inventory
+find agent/subagents -maxdepth 1 -type f -name '*.chain.md' -print | sort
+find agent/extensions/workflows -maxdepth 1 -type f -name '*.ts' -print | sort
+```
+
 ## Syncing & Runtime
 
 **pi-subagents** powers agent execution:
@@ -54,6 +86,10 @@ agent/
 **prompt-composer** is loaded as part of this package, and may also be installed separately in dotfiles-managed setups:
 - Bundled dependency source: `git+ssh://git@github.com/JordanForeman/pi-prompt-composer.git#1ccb7c4e2d9d491035bb456e9e99222d07f53d23`
 - It composes runtime guidance from the synced `agent/skills/**/SKILL.md` metadata.
+
+### Skill activation policy
+
+The four injection modes remain distinct: `always` applies universal guidance, `detect` uses local rules, `classify` is eligible for semantic selection, and `explicit` activates only when requested or directly injected. Automatic classify-only activation is disabled because the package default has no classifier and enabling one would send the current prompt plus classify-skill descriptions to an external model provider, adding latency and cost. Classify-only capabilities remain available through `/skill:<name>` and through explicit prompt/subagent skill arrays. This repository does not enable automatic classifier calls or patch `pi-prompt-composer`.
 
 ### Inheritance chain (work machine)
 
@@ -102,6 +138,10 @@ ralph-groomer → ralph-worker (up to N sequential increments) → ralph-summari
 ```
 
 Treat `/build` as the default operational paradigm for feature work. Use Ralph only when you explicitly want durable `.pi/ralph/` artifacts, a backlog/progress ledger, or multiple autonomous increments across a longer-running objective. The Ralph surface is a compatibility/long-running mode and should converge toward the same build vocabulary over time.
+
+The parent Pi session only schedules phases and receives compact receipts/signals. Worker internals stay inside `ralph-worker` and durable `.pi/ralph/` artifacts. Worker, validator, and summary handoffs include exact commands, exit status, direct observations or artifact pointers, evidence verdicts, and residual gaps.
+
+Exposed commands are `/ralph:start`, `/ralph:status`, `/ralph:stop`, `/ralph:report`, and `/ralph:unlock`. Start creates or updates required `.pi/ralph/` state automatically. `/ralph:unlock` clears a stale lock only when Ralph state confirms that no run is active; it will not unlock an active run.
 
 ## Troubleshooting
 

@@ -16,6 +16,7 @@ const TRIAGE_WORKFLOW: WorkflowDefinition = {
       tasks: [
         {
           agent: "code-explorer",
+          requires: [],
           task: [
             "Investigate source code related to: {input}",
             "",
@@ -27,6 +28,7 @@ const TRIAGE_WORKFLOW: WorkflowDefinition = {
         },
         {
           agent: "log-viewer",
+          requires: [],
           task: [
             "Search for observability signals related to: {input}",
             "",
@@ -45,6 +47,7 @@ const TRIAGE_WORKFLOW: WorkflowDefinition = {
       execution: "sequential",
       tasks: [{
         agent: "architect",
+        requires: [],
         task: [
           "Synthesize all investigation findings into a triage report.",
           "",

@@ -30,7 +30,7 @@ function detectsReadOnlyPromptInjection(tools) {
 function listSubagentFiles() {
   return fs
     .readdirSync(SUBAGENTS_DIR, { withFileTypes: true })
-    .filter((entry) => entry.isFile() && entry.name.endsWith(".md"))
+    .filter((entry) => entry.isFile() && entry.name.endsWith(".md") && entry.name !== "README.md" && !entry.name.endsWith(".chain.md"))
     .map((entry) => path.join(SUBAGENTS_DIR, entry.name))
     .sort();
 }
@@ -56,7 +56,8 @@ function lint({ strict = false } = {}) {
       continue;
     }
 
-    if (detectsReadOnlyPromptInjection(tools)) {
+    const intentionalReadOnlyProfile = frontmatter.promptComposerReadOnly === "true";
+    if (detectsReadOnlyPromptInjection(tools) && !intentionalReadOnlyProfile) {
       warnings.push({
         filePath,
         reason:

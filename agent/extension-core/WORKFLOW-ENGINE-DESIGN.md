@@ -2,14 +2,12 @@
 
 > **Status**: Reference document. The engine is implemented in `workflow-engine.ts`. This document captures the design rationale and architecture decisions. For usage instructions, see `README.md` in this directory and `extensions/workflows/README.md`.
 
-## Problem
+## Purpose
 
-Workflows today are either:
-1. Fully custom extensions (ralph-loop.ts — 680 lines, reimplements all coordination)
-2. Inert JSON files nobody reads (orchestrations/*.json)
-3. Prose instructions in prompt bodies ("do step 1, then step 2...")
-
-We need a shared engine that handles the common mechanics so workflow extensions can focus on **what** happens, not **how** to coordinate it.
+The shared engine centralizes phase dispatch, bounded context, receipts, transitions,
+and UI state so workflow extensions can focus on task intent. The shipped build,
+TDD, triage, PR-review, and Ralph extensions all use this engine. TypeScript
+definitions and their referenced workflow JSON specs remain the source of truth.
 
 ## Execution Model: Hybrid (Engine + LLM)
 
@@ -76,12 +74,12 @@ The engine's instructions tell the LLM to use the `subagent` tool. If the execut
 ## Architecture
 
 ```
-User ──/tdd──▶ Prompt ──triggers──▶ WorkflowExtension ──uses──▶ WorkflowEngine
-                                          │                          │
-                                    declares phases,           manages lifecycle,
-                                    transitions,               injects instructions,
-                                    subagent mapping           tracks via events,
-                                                               updates UI
+User ──/tdd──▶ WorkflowExtension command ──uses──▶ WorkflowEngine
+                           │                              │
+                     declares phases,              manages lifecycle,
+                     transitions,                  injects instructions,
+                     subagent mapping              tracks via events,
+                                                   updates UI
 ```
 
 ### What the engine owns (mechanics)
@@ -105,6 +103,7 @@ User ──/tdd──▶ Prompt ──triggers──▶ WorkflowExtension ──
 ```typescript
 /** How a phase executes its tasks */
 type PhaseExecution = "sequential" | "parallel";
+type PhaseCapability = "filesystem-write" | "shell";
 
 /** What happens after a phase completes */
 type TransitionRule =
@@ -114,10 +113,16 @@ type TransitionRule =
 
 /** A single unit of work within a phase */
 interface PhaseTask {
-  agent: string;           // subagent name
-  task: string;            // instruction template (supports {input}, {context}, {phase:red}, etc.)
-  skill?: string[];        // optional skills to inject
+  agent: string;                  // static subagent name
+  requires: PhaseCapability[];    // mandatory, statically validated capability contract
+  task: string;                   // supports {input}, {context}, {phase:red}, etc.
+  skill?: string[];               // optional skills to inject
+  label?: string;                 // optional receipt fallback name
 }
+
+// In task literals, `requires` immediately follows `agent`. The repository's
+// dependency-free semantic validator enforces this canonical shape and checks
+// the requirements against the selected agent's declared tools.
 
 interface WorkflowContextBudget {
   compactOutputChars: number;
@@ -141,9 +146,10 @@ interface PhaseDefinition {
 /** Result from executing a phase */
 interface PhaseResult {
   phaseId: string;
-  status: "completed" | "failed" | "skipped";
+  status: "completed" | "failed";
   outputs: TaskOutput[];
   durationMs: number;
+  iteration: number;
 }
 
 interface TaskReceipt {
@@ -167,8 +173,6 @@ interface WorkflowContext {
   input: string;
   /** All phase results so far, keyed by phase id */
   phases: Record<string, PhaseResult>;
-  /** Structured findings summary — injected as {context} in task templates */
-  findings: string;
   /** Current phase id */
   currentPhase: string | null;
   /** Workflow-specific state (extensions can store arbitrary data) */
@@ -189,6 +193,7 @@ interface WorkflowDefinition {
   contextMode?: PhaseContextMode;
   contextBudget?: Partial<WorkflowContextBudget>;
   summarizeOutput?: SummarizeOutputHook;
+}
 ```
 
 ## Engine Lifecycle
@@ -207,7 +212,11 @@ class WorkflowEngine {
   start(input: string, ctx: ExtensionCommandContext): void
 
   /** Get current workflow state (for UI, status commands, etc.) */
-  getStatus(): { phase: string | null; context: WorkflowContext }
+  getStatus(): {
+    engineState: EngineState;
+    context: WorkflowContext;
+    definition: WorkflowDefinition;
+  }
 
   // ── Event handlers (registered internally) ──
 
@@ -217,16 +226,16 @@ class WorkflowEngine {
   /** tool_execution_end: detect subagent completion, capture result */
   private onToolExecutionEnd(event): void
 
-  /** agent_end: phase complete — evaluate transition, advance or finish */
-  private onAgentEnd(event, ctx): void
+  /** agent_end: when all expected outputs exist, complete and transition */
+  private onAgentEnd(ctx): void
 
   // ── Phase management ──
 
   /** Build the system prompt addition for the current phase */
   private buildPhaseInstructions(): string
 
-  /** Transition to the next phase based on transition rules */
-  private advancePhase(): void
+  /** Evaluate advance, conditional, or loop transition rules */
+  private evaluateTransition(phase, result, ctx): void
 
   /** Update UI status bar and notifications */
   private updateUI(ctx: ExtensionContext): void
@@ -243,49 +252,43 @@ When the engine is active, it adds a block to the system prompt via `before_agen
 **Current phase: 🔴 Write failing tests** (phase 1 of 3)
 
 Execute this phase by using the `subagent` tool:
-- Agent: `testing-reviewer`
-- Task: "Write failing tests that specify the intended behavior for: [user's input]. Do NOT write implementation code. Tests should fail clearly."
+- Agent: `builder`
+- Required capabilities: `filesystem-write`, `shell`
+- Task: "Establish strict red evidence for [user's input]. Prefer a meaningful focused failing test; do not write implementation code. If honest testing would require disproportionate scaffolding, run and justify the closest executable failing check."
 
-After the subagent completes, report the outcome. The workflow engine will advance to the next phase.
+After the subagent completes, report the outcome. The workflow engine advances after a successful phase and stops an `advance` workflow when the phase fails.
 
 **Do not skip phases or execute future phases prematurely.**
 ```
 
 ### Phase completion detection
 
-The engine listens for `tool_execution_end` events:
+The engine listens for `tool_execution_end` events from `subagent`. It normalizes
+`details.mode === "single"` into one child completion and `"parallel"` into one
+completion per `details.results` entry. Management results and successful empty
+structured result lists (such as async dispatch acknowledgements) do not consume
+phase work. Failed empty single/parallel dispatches synthesize error completions
+for the remaining phase work so count-based completion cannot hang. Both the event
+error flag and nested result error flag are honored. Legacy unstructured results
+still count as one dispatch.
 
-```typescript
-pi.on("tool_execution_end", (event) => {
-  if (event.toolName !== "subagent") return;
-  if (!this.context.currentPhase) return;
+Each completion is compacted against the next pending task, retaining the child's
+agent, final output, exit/error status, and artifact path in its receipt. Outputs
+are capped at the phase's expected task count; a batch-level error does not mark
+successful children as failed.
 
-  // Extract and compact the subagent tool output
-  const output = compactTaskOutput(event.result, phase.contextMode ?? "compact");
-
-  // Record phase result with a bounded result plus receipt metadata
-  this.context.phases[this.context.currentPhase] = {
-    phaseId: this.context.currentPhase,
-    status: event.isError ? "failed" : "completed",
-    outputs: [output],
-    durationMs: /* tracked from phase start */,
-  };
-});
-```
-
-After the agent turn ends (`agent_end`), the engine evaluates the transition rule and either:
+After the agent turn ends (`agent_end`), once all expected task outputs are present,
+the engine records the phase result, evaluates the transition rule and either:
 - Sends the next phase's instructions via `pi.sendUserMessage()`
 - Notifies completion if the workflow is done
 
 ## Example: TDD Workflow Extension
 
+The shipped definition is `agent/extensions/workflows/tdd.ts`. All three phases use
+`builder`, because red must create and run a failing test/check, green must edit the
+implementation, and refactor may edit code before rerunning that same check.
+
 ```typescript
-// agent/extensions/workflows/tdd.ts
-
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { WorkflowEngine, type WorkflowDefinition } from "../../extension-core/workflow-engine";
-import { WorkflowExtensionCore } from "../../extension-core/workflow-extension-core";
-
 const TDD_WORKFLOW: WorkflowDefinition = {
   id: "tdd",
   name: "Test-Driven Development",
@@ -296,8 +299,9 @@ const TDD_WORKFLOW: WorkflowDefinition = {
       label: "🔴 Write failing tests",
       execution: "sequential",
       tasks: [{
-        agent: "testing-reviewer",
-        task: "Write failing tests that specify the intended behavior for: {input}. Do NOT write implementation code. Tests should fail when run.",
+        agent: "builder",
+        requires: ["filesystem-write", "shell"],
+        task: "Establish strict red evidence for: {input}. Do not write implementation code.",
       }],
       transition: { type: "advance" },
     },
@@ -307,54 +311,37 @@ const TDD_WORKFLOW: WorkflowDefinition = {
       execution: "sequential",
       tasks: [{
         agent: "builder",
-        task: "Write the minimal implementation to make the failing tests pass. Do not over-engineer.\n\nTest phase output:\n{phase:red}",
+        requires: ["filesystem-write", "shell"],
+        task: "Write the minimal implementation and rerun the red check.\n\n{phase:red}",
       }],
       transition: { type: "advance" },
     },
     {
       id: "refactor",
-      label: "🔵 Review & refactor",
+      label: "🔵 Constrained refactor",
       execution: "sequential",
       tasks: [{
-        agent: "reviewer",
-        task: "Review the implementation for clarity and design. Refactor if needed. Ensure tests still pass.\n\nFull context:\n{context}",
+        agent: "builder",
+        requires: ["filesystem-write", "shell"],
+        task: "Refactor only where justified, then rerun the red check.\n\n{context}",
       }],
       transition: { type: "advance" },
     },
   ],
 };
-
-class TddExtension extends WorkflowExtensionCore {
-  constructor(pi: ExtensionAPI) {
-    super(pi, { id: "tdd", name: "TDD Workflow", summary: "Red-green-refactor cycle" });
-  }
-
-  protected registerExtension(): void {
-    const engine = new WorkflowEngine(this.pi, TDD_WORKFLOW);
-
-    this.pi.registerCommand("tdd", {
-      description: "Start a TDD workflow: write tests, implement, refactor",
-      handler: async (args, ctx) => {
-        if (!args.trim()) {
-          ctx.ui.notify("Usage: /tdd <what to implement>", "error");
-          return;
-        }
-        engine.start(args.trim(), ctx);
-      },
-    });
-  }
-}
-
-export default function tdd(pi: ExtensionAPI) {
-  new TddExtension(pi).register();
-}
 ```
+
+The live task text additionally requires exact commands, exit status, direct
+observations or artifacts, verdicts, and residual gaps. It permits a bounded
+pre-implementation check only when a useful test would require misleading or
+disproportionate scaffolding.
 
 ## Example: Triage Workflow Extension
 
-```typescript
-// agent/extensions/workflows/triage.ts
+This abbreviated excerpt uses the same agents and capability contracts as
+`agent/extensions/workflows/triage.ts`:
 
+```typescript
 const TRIAGE_WORKFLOW: WorkflowDefinition = {
   id: "triage",
   name: "Incident Triage",
@@ -365,9 +352,16 @@ const TRIAGE_WORKFLOW: WorkflowDefinition = {
       label: "🔍 Parallel investigation",
       execution: "parallel",
       tasks: [
-        { agent: "code-explorer", task: "Examine source code paths related to: {input}" },
-        { agent: "log-viewer", task: "Search logs, traces, and error patterns for: {input}" },
-        // Each track runs as a separate subagent in parallel
+        {
+          agent: "code-explorer",
+          requires: [],
+          task: "Investigate source code related to: {input}",
+        },
+        {
+          agent: "log-viewer",
+          requires: [],
+          task: "Search for observability signals related to: {input}",
+        },
       ],
       transition: { type: "advance" },
     },
@@ -377,13 +371,14 @@ const TRIAGE_WORKFLOW: WorkflowDefinition = {
       execution: "sequential",
       tasks: [{
         agent: "architect",
-        task: "Synthesize all investigation findings into:\n1. Root cause analysis\n2. Confidence level\n3. Recommended next steps\n\nIf critical gaps remain, end your response with NEEDS_FURTHER_INVESTIGATION and specify what to look for.\n\nFindings:\n{context}",
+        requires: [],
+        task: "Synthesize the findings.\n\n{context}",
       }],
       transition: {
         type: "conditional",
-        decide: (results, _context) => {
-          const output = results.outputs[0]?.result ?? "";
-          return output.includes("NEEDS_FURTHER_INVESTIGATION") ? "investigate" : null;
+        decide: (result, context) => {
+          // The live definition permits at most three investigation rounds.
+          return needsMoreEvidence(result, context) ? "investigate" : null;
         },
       },
     },
@@ -391,46 +386,17 @@ const TRIAGE_WORKFLOW: WorkflowDefinition = {
 };
 ```
 
-## Composability
+A parallel phase is emitted as one `subagent` call with a task array. The
+normalizer expands `details.results` into one ordered completion per child, ignores
+management calls, preserves each child's status/output/artifact context, and waits
+for the phase's expected task count.
 
-A workflow can be embedded as a phase in another workflow:
+## Composition boundary
 
-```typescript
-const featureWorkflow: WorkflowDefinition = {
-  id: "feature",
-  name: "Feature Delivery",
-  description: "Plan, implement with TDD, review",
-  phases: [
-    {
-      id: "plan",
-      label: "📋 Plan",
-      execution: "sequential",
-      tasks: [{ agent: "architect", task: "Create implementation plan for: {input}" }],
-      transition: { type: "advance" },
-    },
-    {
-      id: "implement",
-      label: "🔨 Implement (TDD)",
-      execution: "sequential",
-      // Nested workflow — the engine recognizes a workflow reference and delegates
-      tasks: [{ agent: "tdd", task: "{phase:plan}" }],
-      // OR: the engine supports a `workflow` field on PhaseDefinition
-      transition: { type: "advance" },
-    },
-    {
-      id: "ship",
-      label: "🚀 Ship",
-      execution: "sequential",
-      tasks: [{ agent: "git-ops", task: "Stage, commit, and push the implemented changes.\n\n{context}" }],
-      transition: { type: "advance" },
-    },
-  ],
-};
-```
-
-**Open question**: Should nested workflows be:
-- **Inline** (the outer engine runs the inner workflow's phases as its own) — simpler but flattens the hierarchy
-- **Delegated** (the outer engine dispatches to the inner workflow engine) — preserves encapsulation but adds coordination complexity
+Tasks dispatch registered subagents only. The engine does not treat workflow IDs as
+agents, embed one workflow in another, or support a `workflow` field on phase
+definitions. Cross-workflow composition must remain explicit in extension code
+until the runtime implements and tests a dedicated contract.
 
 ## UI Contract
 
@@ -444,19 +410,13 @@ Notifications:
   ✅ Phase "red" completed (12s)
   ▶️ Advancing to "green"
   ⚠️ Phase "green" failed — builder reported errors
-  🎉 Workflow "tdd" completed (3 phases, 47s)
+  ❌ Workflow "tdd" failed: Phase "green" failed.
 ```
 
 Each workflow extension can optionally customize labels and status formatting, but the engine provides sensible defaults.
 
 ## Open Questions
 
-1. **Parallel dispatch**: For triage's parallel investigation, the LLM needs to call `subagent` multiple times (or use the parallel tasks variant). The phase instruction should guide this clearly. Does the engine detect multiple subagent calls for a parallel phase and wait for all of them?
+1. **State persistence**: Should the engine support saving/restoring workflow state across sessions? Minimal value for TDD (session-scoped), but triage might benefit.
 
-2. **Nested workflow composability**: See inline vs delegated above.
-
-3. **State persistence**: Should the engine support saving/restoring workflow state across sessions? Minimal value for TDD (session-scoped), but triage might benefit.
-
-4. **Error recovery**: When a phase fails, should the engine offer retry? Skip? Or always defer to the user?
-
-5. **Prompt binding**: The prompt's `workflow:` frontmatter declares the workflow it triggers. When the user types `/review` (a prompt), should the prompt system detect `workflow: pr-review` and route to the extension's registered command? Or should prompts and workflow commands remain separate entry points?
+2. **Error recovery**: When a phase fails, should the engine offer retry or skip controls rather than stopping with a failed receipt?

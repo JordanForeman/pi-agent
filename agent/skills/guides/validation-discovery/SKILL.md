@@ -1,31 +1,37 @@
 ---
 name: validation-discovery
-description: Discover and run a project's own validation contract instead of imposing your own
+description: Discover project checks and verify changed behavior on its real affected surface
 injection: detect
 detect:
   mode: write
 ---
 
-When validating a change, **discover the project's own validation contract — do not impose one.** Many projects are not yours; enforcing a personal validation spec on a codebase you contribute to is wrong. Adapt to what the project already declares.
+Validation has two distinct tracks.
 
-### Discovery ladder (highest authority first)
+### Project contract
 
-1. **Declared agent contract.** Read `AGENTS.md` / `CLAUDE.md` for an explicit validation, testing, or "how to check this" section.
-2. **Conventional task runners.** `Makefile`, `Justfile`, `package.json` scripts, or a `bin/` directory with conventional targets (`test`, `lint`, `typecheck`, `check`, `ci`).
-3. **CI config.** `.github/workflows/`, `.buildkite/`, etc. — the project already encoded what "passing" means; read and mirror it.
-4. **Language defaults.** Only if nothing above exists: `go test ./...`, `cargo test`, `bundle exec rake`, `npm test`, `dev tc` / `dev style` (Shopify monorepo), etc.
+Discover what this project declares, in order:
 
-### Universal invariants (always check, regardless of project)
+1. `AGENTS.md` or `CLAUDE.md` validation instructions.
+2. Conventional runners such as `Makefile`, `Justfile`, `package.json` scripts, or `bin/` commands.
+3. CI configuration such as `.github/workflows/` or `.buildkite/`.
+4. Language defaults only when no higher-authority contract exists.
 
-- The change builds / typechecks under the project's own toolchain. Run the config the project's build script actually uses (e.g. its app-specific `tsconfig.json`), not the raw compiler default — a bare invocation like `tsc --noEmit` can pull in tests or unrelated files and report pre-existing errors, giving a false gate.
-- New behavior has a test (per `test-first`). This is discipline, not project policy.
-- No left-behind debug artifacts; no public API broadened solely to enable testing.
-- Time-box local validation. When reproducing a check locally would cost more than the signal is worth — an environment that needs long setup, a toolchain that needs provisioning — push and let CI provide it. Bound any long-running command with an explicit timeout and redirect its output to a log file, so a stalled step is visible rather than silently consuming the session.
-- Validate the checker before acting on its output. A quick script written to audit a change is itself untested code, and its failures are indistinguishable from real violations: a pattern that misses one valid form reports phantom passes, and one that spans record boundaries reports phantom failures. Confirm the checker flags a case you know is bad and clears a case you know is good before trusting its verdict.
-- Scope a check to the lines you changed. Attributing a file's pre-existing violations to your edit turns a clean change into a false alarm and buries the signal that matters.
+Run focused checks first, then broader declared checks when appropriate.
 
-When validation exposes unrelated environment drift or pre-existing failures, separate that from the targeted result for the touched code. Report both; do not let ambient drift erase a meaningful targeted pass, and do not call the whole project green. When a repo-wide check is drowned in pre-existing noise, prove the contract with a minimal config scoped to the changed subtree rather than abandoning verification.
+- Build or typecheck with the configuration the project's build script actually uses, not a raw compiler default that can pull in unrelated files.
+- Require tests for new behavior per `test-first`; this is engineering discipline, not inferred project policy.
+- Leave no debug artifacts and do not broaden public APIs solely to enable testing.
+- Time-box costly checks. Redirect long-running output to an artifact so a stall remains visible, and defer to CI when local provisioning costs more than the signal is worth.
+- Validate ad hoc checkers against one known-bad and one known-good case before trusting their output.
+- Scope findings to changed lines. When repository-wide checks are noisy, use a minimal configuration for the changed subtree rather than abandoning verification.
 
-### Honest abstention
+Separate targeted failures from unrelated environment, tooling, or pre-existing failures. Report both; do not let ambient drift erase a meaningful scoped pass, and do not call the whole project green.
 
-If no validation contract is discoverable, **say so explicitly.** Downgrade from a pass/fail verdict to "here is what I ran and what I could not verify." Never fabricate a green result or silently skip validation. Surface the gap and let the user decide.
+### Behavioral proof
+
+Identify the changed UI, CLI/TUI, service/API, integration, or library-consumer path and exercise that same surface when practical. Compilation, typechecking, a build, source inspection, CI status, or another agent's summary can support confidence but cannot alone verify changed runtime behavior.
+
+For every check, retain the exact command, exit status, observed output, and artifact pointer when one exists. Report project checks separately from real-surface observations using `evidence-report` verdicts: `VERIFIED`, `NOT VERIFIED`, or `INCONCLUSIVE`, with individual residual claims marked `UNVERIFIED` where appropriate. Honest abstention is not a pass.
+
+If the required surface is unavailable or a check would be unsafe, state why, what was established instead, and the next cheapest direct check. Do not invent a validation contract.
