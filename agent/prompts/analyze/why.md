@@ -8,6 +8,6 @@ Use the `subagent` tool with the current single-agent schema:
 {
   "agent": "code-explorer",
   "task": "Investigate the historical rationale for: $@",
-  "skill": ["read-only", "code-references", "design-rationale", "evidence-report"]
+  "skill": ["read-only", "code-references", "design-rationale", "research-mode", "evidence-report"]
 }
 ```

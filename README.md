@@ -54,14 +54,16 @@ The repository keeps four concerns separate:
 
 User-facing prompts are grouped by intent:
 
-- Analyze: `/arch`, `/why`, `/blast-radius`, `/skill-eval`, and `/review`
+- Analyze: `/research`, `/arch`, `/why`, `/blast-radius`, `/skill-eval`, and `/review`
 - Plan: `/plan` and `/triage`
 - Ship: `/quick-commit`, `/quick-pr`, and `/verify`
 - Learn: `/learn`
 
 The added guides are also explicitly invocable as `/skill:design-rationale`, `/skill:blast-radius`, and `/skill:skill-evaluation`; use `/skill:evidence-report` when composing a custom evidence-bearing task. Prompt templates that depend on these guides pass a complete explicit skill array to their child role.
 
-Executable workflows are `/build`, `/tdd`, `/triage`, and `/review`; each has a corresponding `:status` command. Pi gives extension commands precedence over same-named prompt templates, so the `/review` and `/triage` workflow commands win their command-name collisions while those extensions are loaded. Physical prompt paths are canonicalized, so loading this package and the corrected dotfiles category paths does not register the same file twice.
+Interaction modes are explicit, non-sticky operating envelopes: `/skill:research-mode`, `/skill:build-mode`, `/skill:verify-mode`, `/skill:review-mode`, and `/skill:ship-mode`. Invoking one authorizes routine actions inside that objective's documented boundary without repeated confirmation. The scope ends with the objective; modes do not bypass runtime guards, OS permissions, credentials, protected/shared branch rules, or ownership checks.
+
+Executable workflows are `/build`, `/research`, `/verify`, `/tdd`, `/triage`, and `/review`; each has a corresponding `:status` command. The research and verification workflows use `scratch_workspace` for disposable clones and fixtures. That tool creates roots directly under the OS temp directory, tracks exact session ownership, and removes only roots it created. Pi gives extension commands precedence over same-named prompt templates, so executable commands win prompt-name collisions while their extensions are loaded. Physical prompt paths are canonicalized, so loading this package and the corrected dotfiles category paths does not register the same file twice.
 
 To inspect the live inventories:
 
@@ -117,7 +119,9 @@ Edit inside this repo, then apply Home Manager for the target machine:
 
 ## Operational Workflows
 
-Use `/build <objective>` for normal feature work. It runs a bounded in-flight implementation loop:
+Choose the command that matches the interaction. The command selects a bounded operating envelope; Pi proceeds autonomously inside it and stops when the next action crosses its safety, ownership, product, or publication boundary.
+
+Use `/research <question>` for cited read-only investigation, `/verify <claim>` for project-contract plus real-surface evidence, and `/build <objective>` for normal feature work. It runs a bounded in-flight implementation loop:
 
 ```text
 planner → builder → parallel reviewers → synthesis → builder fix pass → re-review (max 3 fix rounds) → final summary

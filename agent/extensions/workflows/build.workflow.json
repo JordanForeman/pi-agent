@@ -10,7 +10,7 @@
         {
           "agent": "planner",
           "requires": [],
-          "skill": ["search-before-write", "validation-discovery"],
+          "skill": ["search-before-write", "validation-discovery", "build-mode"],
           "lines": [
             "Create a concise implementation plan for: {input}",
             "",
@@ -35,7 +35,7 @@
         {
           "agent": "builder",
           "requires": ["filesystem-write", "shell"],
-          "skill": ["search-before-write", "test-first", "validation-discovery", "avoid-over-engineering", "code-shape", "naming", "comments", "coupling", "error-signaling", "testing"],
+          "skill": ["search-before-write", "test-first", "validation-discovery", "avoid-over-engineering", "code-shape", "naming", "comments", "coupling", "error-signaling", "testing", "build-mode"],
           "lines": [
             "Implement the planned feature work for: {input}",
             "",
@@ -61,7 +61,7 @@
         {
           "agent": "builder",
           "requires": ["filesystem-write", "shell"],
-          "skill": ["search-before-write", "test-first", "validation-discovery", "avoid-over-engineering", "code-shape", "naming", "comments", "coupling", "error-signaling", "testing"],
+          "skill": ["search-before-write", "test-first", "validation-discovery", "avoid-over-engineering", "code-shape", "naming", "comments", "coupling", "error-signaling", "testing", "build-mode"],
           "lines": [
             "Apply only the accepted in-scope fixes from the synthesized review verdict.",
             "",

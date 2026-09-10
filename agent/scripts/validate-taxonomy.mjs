@@ -437,6 +437,7 @@ async function validateSemanticContracts(skillNames, agentNames, agentCapabiliti
       filePath: toPosix(file),
       agentCapabilities,
       knownAgents: agentNames,
+      skillNames,
     }));
   }
 
@@ -446,6 +447,7 @@ async function validateSemanticContracts(skillNames, agentNames, agentCapabiliti
       filePath: toPosix(file),
       agentCapabilities,
       knownAgents: agentNames,
+      skillNames,
     }));
   }
 

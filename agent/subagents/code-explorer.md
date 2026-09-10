@@ -1,7 +1,7 @@
 ---
 name: code-explorer
 description: Researches code paths, architecture, behavior, and relevant history without modifying the repository.
-tools: read, bash, grep, find, ls
+tools: read, bash, grep, find, ls, scratch_workspace
 skills: read-only, code-references
 tags: research,exploration
 ---

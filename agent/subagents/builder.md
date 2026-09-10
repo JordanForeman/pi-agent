@@ -1,7 +1,7 @@
 ---
 name: builder
 description: Implement planned feature work incrementally with safe, testable changes.
-tools: read, grep, find, ls, bash, edit, write
+tools: read, grep, find, ls, bash, edit, write, scratch_workspace
 skills: test-first, validation-discovery, evidence-report
 tags: implementation,coding,feature
 ---

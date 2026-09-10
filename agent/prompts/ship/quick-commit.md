@@ -2,17 +2,13 @@
 description: Create a single high-signal commit from current changes
 subagents: [git-ops]
 ---
-Create one commit for the current changes.
+Create one commit for the current changes. This explicit `/quick-commit` invocation authorizes one scoped commit containing only the current objective's reviewed files, without a second confirmation.
 
 Workflow:
-1. Inspect repo state (`git status --short`, `git diff --cached`, then `git diff` if needed).
-2. Draft a conventional commit message (subject + body) that explains why.
-3. Ask for confirmation of the message and staged file scope.
-4. Perform all git operations (stage, verify staged diff, commit) through your git specialist path.
-5. Return commit hash, final branch, and post-commit status.
+1. Inspect repository state, attribution, staged and unstaged diffs, and relevant validation.
+2. Separate files belonging to the current objective from unrelated or unexpected state.
+3. Draft a conventional commit message that explains why.
+4. Perform the scoped stage, staged-diff verification, and commit through the git specialist path.
+5. Return the commit hash, branch, and post-commit status.
 
-Constraints:
-- Stage only intended files.
-- Never amend unless explicitly requested.
-- Never skip hooks unless explicitly requested.
-- If there is nothing to commit, report it clearly and stop.
+Never amend, bypass hooks, include unrelated files, overwrite existing work, rewrite history, or write to a protected or shared branch. Stop for destructive changes, credentials or secrets, merge/deploy/release actions, or ambiguity about ownership or scope. This authorization expires after the requested commit.

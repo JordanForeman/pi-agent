@@ -70,13 +70,21 @@ export function validateSettingsPromptPaths({ promptPaths, categories, promptFil
 
 export function extractWorkflowContracts(source, filePath = "workflow source") {
   const matches = [...source.matchAll(/\bagent:\s*["']([^"']+)["']/g)];
-  return matches.map((match) => {
-    const afterAgent = source.slice((match.index ?? 0) + match[0].length);
+  return matches.map((match, index) => {
+    const start = (match.index ?? 0) + match[0].length;
+    const end = matches[index + 1]?.index ?? source.length;
+    const afterAgent = source.slice(start, end);
     const requiresMatch = afterAgent.match(/^\s*,?\s*requires:\s*\[([^\]]*)\]/);
     const requires = requiresMatch
       ? [...requiresMatch[1].matchAll(/["']([^"']+)["']/g)].map((item) => item[1])
       : [];
-    return { agent: match[1], requires, declaresRequires: Boolean(requiresMatch), filePath };
+    const afterRequires = requiresMatch ? afterAgent.slice(requiresMatch[0].length) : "";
+    const skillMatch = afterRequires.match(/^\s*,?\s*skill:\s*\[([^\]]*)\]/);
+    const skills = skillMatch
+      ? [...skillMatch[1].matchAll(/["']([^"']+)["']/g)].map((item) => item[1])
+      : [];
+    const hasLateSkill = Boolean(requiresMatch && !skillMatch && /\bskill\s*:/.test(afterRequires));
+    return { agent: match[1], requires, skills, declaresRequires: Boolean(requiresMatch), hasLateSkill, filePath };
   });
 }
 
@@ -86,6 +94,7 @@ export function validateWorkflowSource({
   agentCapabilities,
   knownAgents,
   allowedBuiltins = new Set(),
+  skillNames,
 }) {
   const diagnostics = [];
   for (const match of source.matchAll(/\bagent:\s*(\S)/g)) {
@@ -94,12 +103,20 @@ export function validateWorkflowSource({
     }
   }
 
+  const tasks = extractWorkflowContracts(source, filePath);
+  for (const task of tasks) {
+    if (task.hasLateSkill) {
+      diagnostics.push(diagnostic(filePath, `Workflow task assigned to "${task.agent}" must declare skill immediately after requires`));
+    }
+  }
+
   diagnostics.push(...validateWorkflowContracts({
-    tasks: extractWorkflowContracts(source, filePath),
+    tasks,
     filePath,
     agentCapabilities,
     knownAgents,
     allowedBuiltins,
+    skillNames,
   }));
   return diagnostics;
 }
@@ -110,6 +127,7 @@ export function validateWorkflowTaskSpecs({
   agentCapabilities,
   knownAgents,
   allowedBuiltins = new Set(),
+  skillNames,
 }) {
   const contracts = tasks.map((task, index) => {
     const record = task && typeof task === "object" && !Array.isArray(task) ? task : {};
@@ -118,7 +136,10 @@ export function validateWorkflowTaskSpecs({
     const requires = declaresRequires
       ? record.requires.filter((requirement) => typeof requirement === "string")
       : [];
-    return { agent, requires, declaresRequires, filePath, index };
+    const skills = Array.isArray(record.skill)
+      ? record.skill.filter((skill) => typeof skill === "string")
+      : [];
+    return { agent, requires, skills, declaresRequires, filePath, index };
   });
 
   const diagnostics = [];
@@ -130,6 +151,9 @@ export function validateWorkflowTaskSpecs({
     if (Array.isArray(source?.requires) && source.requires.some((requirement) => typeof requirement !== "string")) {
       diagnostics.push(diagnostic(filePath, `Workflow task assigned to "${contract.agent || "unknown"}" has a non-string capability requirement`));
     }
+    if (source?.skill !== undefined && (!Array.isArray(source.skill) || source.skill.some((skill) => typeof skill !== "string"))) {
+      diagnostics.push(diagnostic(filePath, `Workflow task assigned to "${contract.agent || "unknown"}" must use a string skill array`));
+    }
   }
 
   diagnostics.push(...validateWorkflowContracts({
@@ -138,11 +162,12 @@ export function validateWorkflowTaskSpecs({
     agentCapabilities,
     knownAgents,
     allowedBuiltins,
+    skillNames,
   }));
   return diagnostics;
 }
 
-function validateWorkflowContracts({ tasks, filePath, agentCapabilities, knownAgents, allowedBuiltins }) {
+function validateWorkflowContracts({ tasks, filePath, agentCapabilities, knownAgents, allowedBuiltins, skillNames }) {
   const diagnostics = [];
   for (const task of tasks) {
     if (!task.declaresRequires) {
@@ -153,6 +178,14 @@ function validateWorkflowContracts({ tasks, filePath, agentCapabilities, knownAg
     if (!knownAgents.has(task.agent) && !allowedBuiltins.has(task.agent)) {
       diagnostics.push(diagnostic(filePath, `Workflow references unknown workflow agent "${task.agent}"`));
       continue;
+    }
+
+    if (skillNames) {
+      for (const skill of task.skills ?? []) {
+        if (!skillNames.has(skill)) {
+          diagnostics.push(diagnostic(filePath, `Workflow task assigned to "${task.agent}" references unknown skill "${skill}"`));
+        }
+      }
     }
 
     const capabilities = agentCapabilities.get(task.agent) ?? new Set();

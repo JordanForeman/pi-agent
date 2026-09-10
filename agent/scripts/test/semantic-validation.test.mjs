@@ -102,12 +102,41 @@ test("workflow validation rejects unknown agents and capability mismatches", asy
   })), /agent must be a static string literal/);
 
   const valid = source.replace("missing-agent", "builder");
+  const unknownSkill = valid.replace("task:", 'skill: ["missing-skill"],\n      task:');
+  assert.match(messages(validateWorkflowSource({
+    source: unknownSkill,
+    filePath: "workflow-invalid.ts",
+    agentCapabilities: new Map([["builder", new Set(["filesystem-write", "shell"])]]),
+    knownAgents: new Set(["builder"]),
+    skillNames: new Set(["known-skill"]),
+  })), /unknown skill "missing-skill"/);
+
   assert.deepEqual(validateWorkflowSource({
     source: valid,
     filePath: "workflow-invalid.ts",
     agentCapabilities: new Map([["builder", new Set(["filesystem-write", "shell"])]]),
     knownAgents: new Set(["builder"]),
   }), []);
+});
+
+test("workflow validation rejects skill metadata placed after another task property", () => {
+  const source = `{
+    agent: "builder",
+    requires: ["filesystem-write", "shell"],
+    task: "Implement the change",
+    skill: ["missing-skill"],
+  }`;
+  const [task] = extractWorkflowContracts(source, "workflow-late-skill.ts");
+
+  assert.deepEqual(task.skills, []);
+  assert.equal(task.hasLateSkill, true);
+  assert.match(messages(validateWorkflowSource({
+    source,
+    filePath: "workflow-late-skill.ts",
+    agentCapabilities: new Map([["builder", new Set(["filesystem-write", "shell"])]]),
+    knownAgents: new Set(["builder"]),
+    skillNames: new Set(["known-skill"]),
+  })), /must declare skill immediately after requires/);
 });
 
 test("workflow validation rejects the original TDD writer regression without capability metadata", async () => {
@@ -162,6 +191,7 @@ test("JSON workflow tasks declare valid agent capabilities", async () => {
     filePath: "workflow specs",
     agentCapabilities,
     knownAgents: new Set(agentCapabilities.keys()),
+    skillNames: new Set(tasks.flatMap((task) => task.skill ?? [])),
   }), []);
 });
 
@@ -170,7 +200,7 @@ test("JSON workflow validation rejects missing metadata, unknown agents, and mis
     tasks: [
       { agent: "builder" },
       { agent: "missing", requires: [] },
-      { agent: "reader", requires: ["filesystem-write"] },
+      { agent: "reader", requires: ["filesystem-write"], skill: ["missing-skill"] },
     ],
     filePath: "invalid.workflow.json",
     agentCapabilities: new Map([
@@ -178,11 +208,13 @@ test("JSON workflow validation rejects missing metadata, unknown agents, and mis
       ["reader", new Set(["shell"])],
     ]),
     knownAgents: new Set(["builder", "reader"]),
+    skillNames: new Set(["known-skill"]),
   });
 
   assert.match(messages(diagnostics), /builder.*explicit requires array/);
   assert.match(messages(diagnostics), /unknown workflow agent "missing"/);
   assert.match(messages(diagnostics), /reader.*requires capability "filesystem-write"/);
+  assert.match(messages(diagnostics), /reader.*unknown skill "missing-skill"/);
 });
 
 test("all live workflow tasks declare explicit capabilities", async () => {
@@ -190,12 +222,14 @@ test("all live workflow tasks declare explicit capabilities", async () => {
     readFile(new URL("../../extensions/workflows/tdd.ts", import.meta.url), "utf8"),
     readFile(new URL("../../extensions/workflows/triage.ts", import.meta.url), "utf8"),
     readFile(new URL("../../extensions/workflows/pr-review.ts", import.meta.url), "utf8"),
+    readFile(new URL("../../extensions/workflows/research.ts", import.meta.url), "utf8"),
+    readFile(new URL("../../extensions/workflows/verify.ts", import.meta.url), "utf8"),
     readFile(new URL("../../extensions/ralph-loop.ts", import.meta.url), "utf8"),
   ]);
-  const [tddTasks, triageTasks, prReviewTasks, ralphTasks] = sources.map((source) => extractWorkflowContracts(source));
+  const [tddTasks, triageTasks, prReviewTasks, researchTasks, verifyTasks, ralphTasks] = sources.map((source) => extractWorkflowContracts(source));
 
-  assert.deepEqual([tddTasks.length, triageTasks.length, prReviewTasks.length, ralphTasks.length], [3, 3, 1, 3]);
-  for (const task of [...tddTasks, ...triageTasks, ...prReviewTasks, ...ralphTasks]) {
+  assert.deepEqual([tddTasks.length, triageTasks.length, prReviewTasks.length, researchTasks.length, verifyTasks.length, ralphTasks.length], [3, 3, 1, 1, 1, 3]);
+  for (const task of [...tddTasks, ...triageTasks, ...prReviewTasks, ...researchTasks, ...verifyTasks, ...ralphTasks]) {
     assert.equal(task.declaresRequires, true, `${task.agent} must declare requires`);
   }
   assert.deepEqual(tddTasks.map(({ agent, requires }) => ({ agent, requires })), [

@@ -2,12 +2,8 @@
 description: Verify a change against project checks and its affected real surface
 subagents: [code-explorer]
 ---
-Use the `subagent` tool with the current single-agent schema:
+Verify `$@` while keeping target source and shared state read-only. Use project-defined checks first, exercise the real affected surface when practical, and return exact commands, exit status, direct observations, a verdict, residual gaps, and the cheapest next check.
 
-```json
-{
-  "agent": "code-explorer",
-  "task": "Verify: $@. Discover the project contract, then exercise the affected UI, CLI, service, integration, or library-consumer surface when practical. Separate repository checks from behavioral proof. Return VERIFIED, NOT VERIFIED, or INCONCLUSIVE with commands, exit statuses, direct observations or artifacts, and residual gaps; compilation alone cannot verify behavior.",
-  "skill": ["read-only", "code-references", "validation-discovery", "evidence-report"]
-}
-```
+Disposable setup is authorized only through `scratch_workspace`; work inside the returned root and remove that exact root when finished. Do not install dependencies, edit target files, publish externally, or use generic destructive cleanup. Stop if verification requires target mutation, credentials, secret access, destructive action, or a product/scope decision.
+
+When the `/verify` workflow extension is loaded, its deterministically injected command takes precedence over this self-contained prompt fallback.
