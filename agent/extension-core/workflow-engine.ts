@@ -55,6 +55,8 @@ export interface PhaseTask {
   task: string;
   /** Optional skills to inject into the subagent */
   skill?: string[];
+  /** Optional subagent model override; omitted preserves the subagent's inherited model */
+  model?: string;
   /** Optional name used in receipts when a tool result does not include the agent */
   label?: string;
   /** Capabilities the selected agent must declare; validated statically by repository tooling */
@@ -329,10 +331,12 @@ export class WorkflowEngine {
       return;
     }
     this.phaseStopReason ??= completions.find((completion) => completion.stopReason)?.stopReason;
+    if (completions.length > remainingTaskCount) {
+      this.phaseStopReason ??= `Unexpected subagent result cardinality: ${completions.length} completions for ${remainingTaskCount} remaining tasks. Restart explicitly.`;
+    }
 
+    // Keep every completion for diagnostics, including an unexpected trailing failure.
     for (const completion of completions) {
-      // A batch may contain more results than this phase requested.
-      if (this.pendingTaskOutputs.length >= this.expectedTaskCount) break;
       const task = this.pendingTasks[this.pendingTaskOutputs.length];
       this.pendingTaskOutputs.push(
         this.compactTaskOutput({
@@ -535,12 +539,14 @@ export class WorkflowEngine {
       for (const task of tasks) {
         const resolved = this.resolveTemplate(task.task);
         lines.push(`- **${task.agent}**: "${resolved}"`);
+        if (task.model !== undefined) lines.push(`  - Model: \`${task.model}\``);
       }
     } else {
       for (const task of tasks) {
         const resolved = this.resolveTemplate(task.task);
         lines.push(`Execute this phase using the \`subagent\` tool:`);
         lines.push(`- Agent: \`${task.agent}\``);
+        if (task.model !== undefined) lines.push(`- Model: \`${task.model}\``);
         lines.push(`- Task: "${resolved}"`);
         if (task.skill && task.skill.length > 0) {
           lines.push(`- Skills: ${task.skill.join(", ")}`);
@@ -576,6 +582,7 @@ export class WorkflowEngine {
           agent: t.agent,
           task: this.resolveTemplate(t.task),
           ...(t.skill ? { skill: t.skill } : {}),
+          ...(t.model !== undefined ? { model: t.model } : {}),
         })),
       }, null, 2));
       lines.push("```");
@@ -589,6 +596,7 @@ export class WorkflowEngine {
           agent: task.agent,
           task: this.resolveTemplate(task.task),
           ...(task.skill ? { skill: task.skill } : {}),
+          ...(task.model !== undefined ? { model: task.model } : {}),
         }, null, 2));
         lines.push("```");
       }
@@ -600,22 +608,14 @@ export class WorkflowEngine {
   // ── Template resolution ──
 
   private resolveTemplate(template: string): string {
-    let result = template;
-
-    // {input} → original user input
-    result = result.replace(/\{input\}/g, this.context.input);
-
-    // {context} → bounded accumulated findings by default
-    result = result.replace(/\{context\}/g, this.formatFindings());
-
-    // {phase:<id>} → context-sized output from a specific phase
-    result = result.replace(/\{phase:([\w-]+)\}/g, (_match, phaseId: string) => {
+    // Resolve only template tokens, never replacement syntax or tokens inside evidence.
+    return template.replace(/\{(input|context|phase:([\w-]+))\}/g, (_match, token: string, phaseId: string) => {
+      if (token === "input") return this.context.input;
+      if (token === "context") return this.formatFindings();
       const phaseResult = this.context.phases[phaseId];
       if (!phaseResult) return `(phase "${phaseId}" has not run yet)`;
       return this.formatPhaseForTemplate(phaseId, phaseResult);
     });
-
-    return result;
   }
 
   private formatFindings(): string {

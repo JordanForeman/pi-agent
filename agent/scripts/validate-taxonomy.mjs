@@ -6,6 +6,7 @@ import { parseFrontmatter, extractBody } from "./lib/frontmatter.mjs";
 import {
   capabilitiesForTools,
   validateAgentContent,
+  validateBuildWorkflowConfig,
   validateClassifierDocumentation,
   validatePromptContent,
   validateSettingsPromptPaths,
@@ -408,7 +409,7 @@ async function discoverWorkflowContracts() {
   for (const file of specPaths) {
     if (!(await pathExists(file))) continue;
     const value = JSON.parse(await fs.readFile(file, "utf8"));
-    specs.push({ file, tasks: collectWorkflowSpecTasks(value) });
+    specs.push({ file, value, tasks: collectWorkflowSpecTasks(value) });
   }
 
   return { workflowIds, sources, specs };
@@ -441,7 +442,10 @@ async function validateSemanticContracts(skillNames, agentNames, agentCapabiliti
     }));
   }
 
-  for (const { file, tasks } of specs) {
+  for (const { file, value, tasks } of specs) {
+    if (path.basename(file) === "build.workflow.json") {
+      errors.push(...validateBuildWorkflowConfig({ spec: value, filePath: toPosix(file) }));
+    }
     errors.push(...validateWorkflowTaskSpecs({
       tasks,
       filePath: toPosix(file),

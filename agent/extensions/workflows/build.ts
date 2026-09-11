@@ -22,6 +22,7 @@ type BuildTaskSpec = {
   agent: string;
   requires: PhaseCapability[];
   skill?: string[];
+  model?: string;
   lines: string[];
 };
 
@@ -36,8 +37,13 @@ type BuildPhaseSpec = {
 type BuildTemplate = {
   description: string;
   maxFixRounds: number;
+  reviewModels: { core?: string; selector?: string };
+  selection: BuildPhaseSpec;
   phases: BuildPhaseSpec[];
 };
+
+const SPECIALIST_ROLES = ["design-reviewer", "rails-reviewer", "frontend-reviewer", "testing-reviewer"] as const;
+type SelectionDecision = { agent: string; applicable: boolean; reason: string };
 
 const BUILD_TEMPLATE = loadBuildTemplate();
 
@@ -52,13 +58,26 @@ function validateBuildTemplate(value: unknown): BuildTemplate {
   validateRequiredPhaseIds(phases);
   const maxFixRounds = asNumber(template.maxFixRounds, "maxFixRounds");
 
-  if (maxFixRounds < 1) {
-    throw new Error("build.workflow.json: maxFixRounds must be at least 1");
+  if (maxFixRounds < 1 || maxFixRounds > 3) {
+    throw new Error("build.workflow.json: maxFixRounds must be between 1 and 3");
+  }
+
+  const models = template.reviewModels === undefined ? {} : asRecord(template.reviewModels, "reviewModels");
+  for (const key of Object.keys(models)) {
+    if (key !== "core" && key !== "selector") throw new Error(`build.workflow.json: unknown reviewModels key "${key}"`);
+    asString(models[key], `reviewModels.${key}`);
+  }
+  const selection = validatePhaseSpec(template.selection, "selection");
+  if (selection.id !== "select-reviewers" || selection.execution !== "sequential"
+    || selection.tasks.length !== 1 || selection.tasks[0].agent !== "pr-triage") {
+    throw new Error("build.workflow.json: selection must dispatch only pr-triage sequentially as select-reviewers");
   }
 
   return {
     description: asString(template.description, "description"),
     maxFixRounds,
+    reviewModels: models as BuildTemplate["reviewModels"],
+    selection,
     phases,
   };
 }
@@ -82,7 +101,7 @@ function validateRequiredPhaseIds(phases: BuildPhaseSpec[]): void {
   }
 }
 
-function validatePhaseSpec(value: unknown, index: number): BuildPhaseSpec {
+function validatePhaseSpec(value: unknown, index: number | string): BuildPhaseSpec {
   const phase = asRecord(value, `phases[${index}]`);
   const execution = asString(phase.execution, `phases[${index}].execution`);
   const contextMode = phase.contextMode === undefined ? undefined : asString(phase.contextMode, `phases[${index}].contextMode`);
@@ -109,7 +128,7 @@ function validatePhaseSpec(value: unknown, index: number): BuildPhaseSpec {
   };
 }
 
-function validateTaskSpec(value: unknown, phaseIndex: number, taskIndex: number): BuildTaskSpec {
+function validateTaskSpec(value: unknown, phaseIndex: number | string, taskIndex: number): BuildTaskSpec {
   const task = asRecord(value, `phases[${phaseIndex}].tasks[${taskIndex}]`);
   const skill = task.skill === undefined
     ? undefined
@@ -130,6 +149,7 @@ function validateTaskSpec(value: unknown, phaseIndex: number, taskIndex: number)
     agent: asString(task.agent, `phases[${phaseIndex}].tasks[${taskIndex}].agent`),
     requires: asCapabilities(task.requires, `phases[${phaseIndex}].tasks[${taskIndex}].requires`),
     skill,
+    ...(task.model !== undefined ? { model: asString(task.model, `phases[${phaseIndex}].tasks[${taskIndex}].model`) } : {}),
     lines,
   };
 }
@@ -172,14 +192,68 @@ function asNumber(value: unknown, label: string): number {
   return value;
 }
 
-function extractBuildVerdict(result: PhaseResult): BuildVerdict | null {
-  const text = result.outputs
-    .flatMap((output) => [output.receipt.verdict, output.result])
-    .filter((value): value is string => Boolean(value))
-    .join("\n");
+function successfulPhase(result: PhaseResult | undefined, agents: readonly string[], iteration?: number): boolean {
+  return Boolean(result && result.status === "completed"
+    && (iteration === undefined || result.iteration === iteration)
+    && result.outputs.length === agents.length
+    && agents.every((agent) => result.outputs.filter((output) => output.agent === agent
+      && output.status === "success" && output.result.trim() !== "").length === 1));
+}
 
-  const match = text.match(/(?:^|\n)\s*(?:\*\*)?Verdict(?:\*\*)?\s*:\s*(?:\*\*)?(BUILD_(?:CLEAN|FIXES_NEEDED|BLOCKED))\b/i);
-  return match ? match[1].toUpperCase() as BuildVerdict : null;
+function extractBuildVerdict(result: PhaseResult): BuildVerdict | null {
+  if (!successfulPhase(result, ["reviewer"])) return null;
+  // Parse raw synthesis, never the lossy first-verdict receipt. Exactly one standalone line.
+  const text = result.outputs[0].result;
+  const lines = text.split(/\r?\n/).filter((line) => /^\s*(?:\*\*)?Verdict\b/i.test(line));
+  if (lines.length !== 1) return null;
+  const match = lines[0].match(/^\s*(?:\*\*)?Verdict(?:\*\*)?\s*:\s*(?:\*\*)?(BUILD_(?:CLEAN|FIXES_NEEDED|BLOCKED))(?:\*\*)?\s*$/);
+  // A second verdict token, even in prose, is ambiguous and must not authorize fixes.
+  const tokens = text.match(/\bBUILD_[A-Z_]+\b/g) ?? [];
+  return match && tokens.length === 1 ? match[1] as BuildVerdict : null;
+}
+
+function parseSelection(result: PhaseResult | undefined, iteration: number): SelectionDecision[] | null {
+  if (!successfulPhase(result, ["pr-triage"], iteration)) return null;
+  try {
+    const raw = result!.outputs[0].result;
+    const value = JSON.parse(raw);
+    // JSON.parse silently overwrites duplicate keys. This fixed schema has exactly
+    // 13 keys; tokenize whole strings (including escaped quotes in reasons) before
+    // counting property colons, then validate every object's shape below.
+    const keyCount = [...raw.matchAll(/"(?:\\.|[^"\\])*"\s*(:)?/g)].filter((match) => match[1]).length;
+    if (keyCount !== 1 + 3 * SPECIALIST_ROLES.length) return null;
+    if (!value || Array.isArray(value) || Object.keys(value).join() !== "decisions"
+      || !Array.isArray(value.decisions) || value.decisions.length !== SPECIALIST_ROLES.length) return null;
+    const seen = new Set<string>();
+    for (const decision of value.decisions) {
+      if (!decision || Array.isArray(decision) || Object.keys(decision).sort().join() !== "agent,applicable,reason"
+        || !SPECIALIST_ROLES.includes(decision.agent) || seen.has(decision.agent)
+        || typeof decision.applicable !== "boolean" || typeof decision.reason !== "string" || !decision.reason.trim()) return null;
+      seen.add(decision.agent);
+    }
+    return value.decisions;
+  } catch {
+    return null;
+  }
+}
+
+function reviewPrerequisites(context: WorkflowContext, includeSelection = true, includeSpecialists = true): boolean {
+  const round = fixRounds(context) + 1;
+  if (!successfulPhase(context.phases.plan, ["planner"])
+    || !successfulPhase(context.phases.implement, ["builder"])
+    || !successfulPhase(context.phases["core-review"], ["reviewer"], round)) return false;
+  if (!includeSelection) return true;
+  const decisions = parseSelection(context.phases["select-reviewers"], round);
+  if (!decisions) return false;
+  const agents = decisions.filter((decision) => decision.applicable).map((decision) => decision.agent);
+  // Specialist phase iterations count dispatches, not rounds (zero selection skips it).
+  return !includeSpecialists || agents.length === 0 || successfulPhase(context.phases["specialist-review"], agents);
+}
+
+function blockBuild(context: WorkflowContext, reason: string): string {
+  context.state.finalVerdict = "BUILD_BLOCKED";
+  context.state.blockedReason = reason;
+  return "finalize";
 }
 
 function fixRounds(context: WorkflowContext): number {
@@ -192,101 +266,143 @@ function templateTasks(tasks: BuildTaskSpec[]): PhaseTask[] {
     requires: task.requires,
     task: task.lines.join("\n"),
     ...(task.skill ? { skill: task.skill } : {}),
+    ...(task.model !== undefined ? { model: task.model } : {}),
   }));
 }
 
 function transitionFor(phaseId: string): TransitionRule {
-  if (phaseId === "synthesize") {
-    return {
-      type: "conditional",
-      decide: (result, context) => {
-        const verdict = extractBuildVerdict(result);
-        context.state.finalVerdict = verdict ?? "BUILD_BLOCKED";
-
+  if (phaseId === "finalize") return { type: "advance" };
+  return {
+    type: "conditional",
+    decide: (result, context) => {
+      if (phaseId === "synthesize") {
+        const verdict = reviewPrerequisites(context) && result.iteration === fixRounds(context) + 1
+          ? extractBuildVerdict(result) : null;
+        if (!verdict) return blockBuild(context, "Review prerequisites or synthesis failed, were missing, or were ambiguous.");
+        context.state.finalVerdict = verdict;
         if (verdict === "BUILD_FIXES_NEEDED" && fixRounds(context) < BUILD_TEMPLATE.maxFixRounds) {
           context.state.fixRounds = fixRounds(context) + 1;
           return "fix";
         }
-
         return "finalize";
-      },
-    };
-  }
-
-  if (phaseId === "fix") {
-    return {
-      type: "conditional",
-      decide: (result, context) => {
-        if (result.status === "failed") {
-          context.state.finalVerdict = "BUILD_BLOCKED";
-          return "finalize";
+      }
+      if (phaseId === "select-reviewers") {
+        const decisions = parseSelection(result, fixRounds(context) + 1);
+        if (!reviewPrerequisites(context, false) || !decisions) {
+          return blockBuild(context, "Specialist selection failed or violated the complete four-role JSON contract.");
         }
-        return "review";
-      },
-    };
-  }
-
-  return { type: "advance" };
+        context.state.selection = decisions;
+        return decisions.some((decision) => decision.applicable) ? "specialist-review" : "synthesize";
+      }
+      if (phaseId === "specialist-review") {
+        return reviewPrerequisites(context) ? "synthesize" : blockBuild(context, "Current specialist review evidence is incomplete or failed.");
+      }
+      const agent = phaseId === "plan" ? "planner" : phaseId === "core-review" ? "reviewer" : "builder";
+      if (!successfulPhase(result, [agent])) return blockBuild(context, `${phaseId} failed or returned no usable evidence.`);
+      if (phaseId === "fix") {
+        const evidence = context.state.fixEvidence as PhaseResult[];
+        evidence.push(result);
+        // Active review evidence belongs to exactly one round. Do not reinject old findings/verdicts.
+        for (const id of ["core-review", "select-reviewers", "specialist-review", "synthesize", "fix"]) delete context.phases[id];
+        delete context.state.selection;
+        delete context.state.blockedReason;
+        context.state.finalVerdict = null;
+        return "core-review";
+      }
+      if (phaseId === "core-review") {
+        return reviewPrerequisites(context, false) ? "select-reviewers" : blockBuild(context, "Core review prerequisites are missing or failed.");
+      }
+      return phaseId === "plan" ? "implement" : "core-review";
+    },
+  };
 }
 
 function formatBuildContext(context: WorkflowContext): string {
-  const phaseSummaries = Object.entries(context.phases)
-    .map(([phaseId, result]) => {
-      const outputs = result.outputs.map((output) => `### ${phaseId} — ${output.agent}\n${output.result}`);
-      return outputs.join("\n\n");
-    })
-    .filter(Boolean)
+  const format = (phaseId: string, result: PhaseResult) => result.outputs
+    .map((output) => `### ${phaseId} — ${output.agent} (${output.status})\n${output.result}`)
     .join("\n\n");
-
+  // Current evidence first; fix history is separate implementation evidence, not active findings.
+  const activeIds = ["synthesize", "core-review", "select-reviewers", "specialist-review"];
+  const active = activeIds.filter((id) => context.phases[id]).map((id) => format(id, context.phases[id]));
+  const fixEvidence = (context.state.fixEvidence as PhaseResult[]).map((result) => format(`fix evidence ${result.iteration}`, result));
+  const background = Object.entries(context.phases).filter(([id]) => !activeIds.includes(id)).map(([id, result]) => format(id, result));
   return [
     "Build state:",
     `- Final verdict: ${typeof context.state.finalVerdict === "string" ? context.state.finalVerdict : "pending"}`,
     `- Fix rounds: ${fixRounds(context)}/${BUILD_TEMPLATE.maxFixRounds}`,
+    ...(context.state.blockedReason ? [`- Blocked reason: ${context.state.blockedReason}`] : []),
     "",
-    phaseSummaries || "(no phase findings yet)",
-  ].join("\n");
+    ...active,
+    ...fixEvidence,
+    ...background,
+  ].join("\n\n");
 }
 
-function createBuildWorkflow(commandName: string): WorkflowDefinition {
+export function createBuildWorkflow(commandName: string): WorkflowDefinition {
   const buildPhases = Object.fromEntries(
     BUILD_TEMPLATE.phases.map((phase) => [phase.id, {
       id: phase.id,
       label: phase.label,
       execution: phase.execution,
-      contextMode: phase.contextMode,
+      // Retain raw evidence so an empty successful child cannot pass a receipt-only check.
+      contextMode: "full",
       tasks: templateTasks(phase.tasks),
       transition: transitionFor(phase.id),
     }]),
   ) as Record<string, WorkflowDefinition["phases"][number]>;
+
+  const reviewContext = { review_context: "Original objective: {input}\nCurrent build context:\n{context}" };
+  const core = createSharedReviewPhase(reviewContext, ["reviewer"]);
+  const coreTasks = core.tasks as PhaseTask[];
+  if (BUILD_TEMPLATE.reviewModels.core !== undefined) coreTasks[0].model = BUILD_TEMPLATE.reviewModels.core;
+  const selectorTasks = templateTasks(BUILD_TEMPLATE.selection.tasks);
+  if (BUILD_TEMPLATE.reviewModels.selector !== undefined) selectorTasks[0].model = BUILD_TEMPLATE.reviewModels.selector;
 
   return {
     id: commandName,
     name: "Build",
     description: BUILD_TEMPLATE.description,
     formatContext: formatBuildContext,
+    // Build gates require lossless evidence in synthesis AND fix dispatches.
+    // Disable aggregate truncation, rather than substituting a larger finite cap.
+    // Other workflows retain their bounded default; provider limits still apply.
+    contextBudget: { aggregateContextChars: Number.POSITIVE_INFINITY },
     initialize: (input) => ({
       input,
       state: {
         fixRounds: 0,
         finalVerdict: null,
+        fixEvidence: [],
       },
     }),
     phases: [
       buildPhases.plan,
       buildPhases.implement,
-      createSharedReviewPhase({
-        review_context: [
-          "Original objective: {input}",
-          "Plan/implementation context:",
-          "{context}",
-        ].join("\n"),
-      }),
+      { ...core, id: "core-review", label: "🔎 Core correctness and safety review", execution: "sequential", contextMode: "full", transition: transitionFor("core-review") },
+      {
+        ...BUILD_TEMPLATE.selection,
+        contextMode: "full",
+        tasks: selectorTasks,
+        transition: transitionFor("select-reviewers"),
+      },
+      {
+        id: "specialist-review",
+        label: "🔬 Relevant specialist reviews",
+        execution: "parallel",
+        contextMode: "full",
+        tasks: (context) => createSharedReviewPhase(reviewContext,
+          (context.state.selection as SelectionDecision[]).filter((decision) => decision.applicable).map((decision) => decision.agent),
+        ).tasks as PhaseTask[],
+        transition: transitionFor("specialist-review"),
+      },
       createSharedReviewSynthesisPhase({
         verdict_instructions: [
-          "Return exactly one verdict line:",
-          "- Verdict: BUILD_CLEAN — no blockers or fixes worth doing now remain",
-          "- Verdict: BUILD_FIXES_NEEDED — concrete in-scope fixes should be applied before completion",
-          "- Verdict: BUILD_BLOCKED — user/product/scope/security/architecture decision is required before fixes",
+          "Return exactly one standalone verdict line (no suffix, no other BUILD_* tokens):",
+          "Verdict: BUILD_CLEAN",
+          "or Verdict: BUILD_FIXES_NEEDED",
+          "or Verdict: BUILD_BLOCKED",
+          "Choose clean only when no blockers or worthwhile fixes remain; fixes-needed only for concrete approved in-scope fixes; blocked for missing evidence or user/product/scope/security/architecture decisions.",
+          "Use only current-round core/selection/specialist findings. Fix evidence records prior implementation, not unresolved reviewer findings.",
           "",
           "Then provide:",
           "1. Accepted fixes worth doing now (file-specific)",
@@ -319,7 +435,7 @@ class BuildExtension extends WorkflowExtensionCore {
 
   private registerLoopCommand(name: "build", engine: WorkflowEngine): void {
     this.pi.registerCommand(name, {
-      description: `Start a ${name}: plan → implement → parallel review → fix/re-review until clean or capped`,
+      description: `Start a ${name}: plan → implement → core review → select specialists → synthesis → bounded fixes`,
       handler: async (args, ctx) => {
         const input = args.trim();
         if (!input) {

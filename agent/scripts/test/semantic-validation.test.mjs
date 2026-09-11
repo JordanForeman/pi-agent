@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   extractWorkflowContracts,
   validateAgentContent,
+  validateBuildWorkflowConfig,
   validateClassifierDocumentation,
   validatePromptContent,
   validateSettingsPromptPaths,
@@ -274,13 +275,45 @@ test("workflow extraction does not borrow unrelated later requires metadata", ()
   })), /must declare an explicit requires array/);
 });
 
+test("canonical workflow tasks accept optional static model overrides", () => {
+  for (const properties of [
+    'model: "test-provider/core:high", task: "Work"',
+    'task: "Work", model: "test-provider/core:high"',
+    'skill: [], model: \'test-provider/selector\', task: "Work"',
+  ]) {
+    assert.deepEqual(validateStaticTask(`{ agent: "builder", requires: [], ${properties} }`), []);
+  }
+});
+
+for (const model of ['""', '"  "', '42', 'null', 'selectedModel', '"test" + suffix', '"first", model: "second"']) {
+  test(`canonical workflow tasks reject invalid model metadata: ${model}`, () => {
+    assert.match(messages(validateStaticTask(`{ agent: "builder", requires: [], model: ${model}, task: "Work" }`)), /canonical.*task|model/);
+  });
+}
+
+for (const model of ["", "  ", 42, null, false, [], {}]) {
+  test(`JSON workflow tasks reject invalid model metadata: ${JSON.stringify(model)}`, () => {
+    assert.match(messages(validateWorkflowTaskSpecs({
+      tasks: [{ agent: "builder", requires: [], model }], filePath: "models.workflow.json",
+      agentCapabilities: new Map(), knownAgents: new Set(["builder"]),
+    })), /model.*non-empty string/);
+  });
+}
+
+test("JSON workflow tasks accept omitted or nonempty model metadata", () => {
+  assert.deepEqual(validateWorkflowTaskSpecs({
+    tasks: [{ agent: "builder", requires: [] }, { agent: "builder", requires: [], model: "test-provider/core:high" }],
+    filePath: "models.workflow.json", agentCapabilities: new Map(), knownAgents: new Set(["builder"]),
+  }), []);
+});
+
 test("JSON workflow tasks declare valid agent capabilities", async () => {
   const specs = await Promise.all([
     readFile(new URL("../../extension-core/review.workflow.json", import.meta.url), "utf8").then(JSON.parse),
     readFile(new URL("../../extensions/workflows/build.workflow.json", import.meta.url), "utf8").then(JSON.parse),
   ]);
   const tasks = specs.flatMap((spec) => {
-    const phases = spec.phases ?? [spec.review, spec.synthesize];
+    const phases = spec.phases ? [...spec.phases, spec.selection] : [spec.review, spec.synthesize];
     return phases.flatMap((phase) => phase.tasks);
   });
   const writable = new Set(["filesystem-write", "shell"]);
@@ -296,6 +329,28 @@ test("JSON workflow tasks declare valid agent capabilities", async () => {
     knownAgents: new Set(agentCapabilities.keys()),
     skillNames: new Set(tasks.flatMap((task) => task.skill ?? [])),
   }), []);
+});
+
+test("build review configuration validates optional models and the selector contract", async () => {
+  const spec = JSON.parse(await readFile(new URL("../../extensions/workflows/build.workflow.json", import.meta.url), "utf8"));
+  for (const reviewModels of [undefined, {}, { core: "test-provider/core" }, { selector: "test-provider/selector" }]) {
+    assert.deepEqual(validateBuildWorkflowConfig({ spec: { ...spec, reviewModels }, filePath: "build.workflow.json" }), []);
+  }
+  for (const reviewModels of [null, [], { core: "" }, { selector: 42 }, { specialist: "test-provider/model" }]) {
+    assert.match(messages(validateBuildWorkflowConfig({ spec: { ...spec, reviewModels }, filePath: "build.workflow.json" })), /reviewModels/);
+  }
+  for (const selection of [undefined, { ...spec.selection, tasks: [] }, { ...spec.selection, tasks: [{ agent: "builder" }] }]) {
+    assert.match(messages(validateBuildWorkflowConfig({ spec: { ...spec, selection }, filePath: "build.workflow.json" })), /selection/);
+  }
+  for (const maxFixRounds of [0, 4, 1.5]) {
+    assert.match(messages(validateBuildWorkflowConfig({ spec: { ...spec, maxFixRounds }, filePath: "build.workflow.json" })), /maxFixRounds/);
+  }
+  assert.equal(spec.selection.tasks[0].agent, "pr-triage");
+  assert.match(messages(validateWorkflowTaskSpecs({
+    tasks: [{ ...spec.selection.tasks[0], skill: ["missing-skill"], requires: ["filesystem-write"] }],
+    filePath: "build.workflow.json", knownAgents: new Set(["pr-triage"]),
+    agentCapabilities: new Map([["pr-triage", new Set(["shell"])]]), skillNames: new Set(),
+  })), /requires capability "filesystem-write"/);
 });
 
 test("JSON workflow validation rejects missing metadata, unknown agents, and mismatches", () => {

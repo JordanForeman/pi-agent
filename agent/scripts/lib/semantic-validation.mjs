@@ -86,14 +86,16 @@ function canonicalTaskSuffix(source) {
   const taskString = `(?:${sourceString})`;
   const taskArray = `\\[\\s*(?:${taskString}(?:\\s*,\\s*${taskString})*\\s*,?)?\\s*\\]`;
   const text = `(?:${taskString}|${taskArray}\\s*\\.\\s*join\\s*\\(\\s*${quotedSource}\\s*\\))`;
-  const property = new RegExp(`^\\s*,\\s*(?:(task|label)\\s*:\\s*(${text})|(skill)\\s*:\\s*(${sourceLiteralArray}))`);
+  const modelLiteral = String.raw`(?:"[^"\\\r\n]*"|'[^'\\\r\n]*')`;
+  const property = new RegExp(`^\\s*,\\s*(?:(task|label)\\s*:\\s*(${text})|(skill)\\s*:\\s*(${sourceLiteralArray})|(model)\\s*:\\s*(${modelLiteral}))`);
   const seen = new Set();
   let hasLateSkill = false;
   while (!/^\s*,?\s*}/.test(source)) {
     const match = source.match(property);
     if (!match) return { valid: false, hasLateSkill };
-    const name = match[1] ?? match[3];
+    const name = match[1] ?? match[3] ?? match[5];
     if (seen.has(name)) return { valid: false, hasLateSkill };
+    if (name === "model" && !match[6].slice(1, -1).trim()) return { valid: false, hasLateSkill };
     seen.add(name);
     if (name === "skill") hasLateSkill = true;
     source = source.slice(match[0].length);
@@ -149,7 +151,7 @@ export function validateWorkflowSource({
       diagnostics.push(diagnostic(filePath, `Workflow task assigned to "${task.agent}" requires array must contain only static string literals`));
     }
     if (task.invalidTaskMetadata) {
-      diagnostics.push(diagnostic(filePath, `Workflow canonical source task must use literal task/label text or joined literal text arrays after requires/skill; metadata overrides and spreads are unsupported`));
+      diagnostics.push(diagnostic(filePath, `Workflow canonical source task must use literal task/label text or joined literal text arrays and an optional non-empty unescaped model string after requires/skill; metadata overrides and spreads are unsupported`));
     }
     if (task.hasLateSkill) {
       diagnostics.push(diagnostic(filePath, `Workflow task assigned to "${task.agent}" must declare skill immediately after requires`));
@@ -164,6 +166,31 @@ export function validateWorkflowSource({
     allowedBuiltins,
     skillNames,
   }));
+  return diagnostics;
+}
+
+// Build routing is config metadata, not a task: validate it alongside the recursively discovered tasks.
+export function validateBuildWorkflowConfig({ spec, filePath }) {
+  const diagnostics = [];
+  const models = spec.reviewModels;
+  if (models !== undefined) {
+    if (!models || typeof models !== "object" || Array.isArray(models)) {
+      diagnostics.push(diagnostic(filePath, "Build reviewModels must be an object"));
+    } else {
+      for (const [key, value] of Object.entries(models)) {
+        if (!["core", "selector"].includes(key)) diagnostics.push(diagnostic(filePath, `Unknown build reviewModels key "${key}"`));
+        if (typeof value !== "string" || !value.trim()) diagnostics.push(diagnostic(filePath, `Build reviewModels.${key} must be a non-empty string`));
+      }
+    }
+  }
+  const selection = spec.selection;
+  if (selection?.id !== "select-reviewers" || selection?.execution !== "sequential"
+    || !Array.isArray(selection?.tasks) || selection.tasks.length !== 1 || selection.tasks[0]?.agent !== "pr-triage") {
+    diagnostics.push(diagnostic(filePath, "Build selection must dispatch only pr-triage sequentially as select-reviewers"));
+  }
+  if (!Number.isInteger(spec.maxFixRounds) || spec.maxFixRounds < 1 || spec.maxFixRounds > 3) {
+    diagnostics.push(diagnostic(filePath, "Build maxFixRounds must be between 1 and 3"));
+  }
   return diagnostics;
 }
 
@@ -196,6 +223,9 @@ export function validateWorkflowTaskSpecs({
     const source = tasks[contract.index];
     if (Array.isArray(source?.requires) && source.requires.some((requirement) => typeof requirement !== "string")) {
       diagnostics.push(diagnostic(filePath, `Workflow task assigned to "${contract.agent || "unknown"}" has a non-string capability requirement`));
+    }
+    if (source?.model !== undefined && (typeof source.model !== "string" || source.model.trim() === "")) {
+      diagnostics.push(diagnostic(filePath, `Workflow task assigned to "${contract.agent || "unknown"}" model must be a non-empty string`));
     }
     if (source?.skill !== undefined && (!Array.isArray(source.skill) || source.skill.some((skill) => typeof skill !== "string"))) {
       diagnostics.push(diagnostic(filePath, `Workflow task assigned to "${contract.agent || "unknown"}" must use a string skill array`));

@@ -126,14 +126,23 @@ Choose the command that matches the interaction. The command selects a bounded o
 Use `/research <question>` for cited read-only investigation, `/verify <claim>` for project-contract plus real-surface evidence, and `/build <objective>` for normal feature work. It runs a bounded in-flight implementation loop:
 
 ```text
-planner → builder → parallel reviewers → synthesis → builder fix pass → re-review (max 3 fix rounds) → final summary
+planner → builder → core reviewer → pr-triage selection → relevant specialists (0–4) → synthesis
+                        ↑                                                        ↓
+                        └──────── builder fix pass (max 3 rounds) ───────────────┘
+                                                             clean/blocked/capped → final summary
 ```
 
-The loop keeps implementation and fix phases to a single writer (`builder`) while parallel review remains read-only. Review synthesis emits one of `BUILD_CLEAN`, `BUILD_FIXES_NEEDED`, or `BUILD_BLOCKED` to decide whether to fix, produce a blocked final summary for a user decision, or finalize cleanly.
+The loop keeps implementation and fix phases to a single writer (`builder`). The generalized `reviewer` always reviews correctness, regressions, safety, and security first. Existing `pr-triage` then returns strict JSON applicability decisions with nonempty evidence-based reasons for all four allowed specialists: `design-reviewer`, `rails-reviewer`, `frontend-reviewer`, and `testing-reviewer`. The parent dispatches only selected reviewers (parallel when multiple); a valid all-false selection goes directly to synthesis. The selector never delegates, and every phase dispatch remains foreground (`async: false`).
+
+Synthesis must succeed with exactly one standalone verdict line: `Verdict: BUILD_CLEAN`, `Verdict: BUILD_FIXES_NEEDED`, or `Verdict: BUILD_BLOCKED`. Missing, malformed, ambiguous, or failed selection/review/synthesis evidence cannot authorize clean completion or fixes. After successful fixes, active review/selection/synthesis state is discarded and core review plus selection run again; fix evidence is retained separately. Three fix rounds is the hard maximum, and unresolved work finalizes honestly rather than being marked clean.
 
 `/review` remains the post-hoc diff review command (`pr-review.ts`); it should not mutate files. Keep `/review` and `/build` separate: review reports on existing changes, build is allowed to create or revise changes through the review loop.
 
-The build-specific phase prompt/spec lives in `agent/extensions/workflows/build.workflow.json`; the shared review contract used by both `/build` and `/review` lives in `agent/extension-core/review.workflow.json`. `build.ts` only loads those specs and supplies transition logic. Phase tasks are already delegated to subagents by `WorkflowEngine`, and the JSON specs explicitly attach relevant standards/conventions skills to each phase.
+The build-specific phase prompts, selector contract, and optional routing settings live in `agent/extensions/workflows/build.workflow.json`; the shared review prompts/skills used by both `/build` and `/review` live in `agent/extension-core/review.workflow.json`. `build.ts` materializes the adaptive phases and supplies parsing and transition gates. Phase tasks are already delegated to subagents by `WorkflowEngine`, and the JSON specs explicitly attach relevant standards/conventions skills to each phase.
+
+Workflow `PhaseTask` definitions and the build/shared-review JSON task specs accept an optional non-empty `model` string. The engine includes it in the parent’s single/parallel foreground dispatch instructions; omitted fields preserve existing subagent model inheritance. Canonical TypeScript task metadata uses an unescaped literal model string after `requires` and optional `skill`. Validation checks metadata shape, not provider availability. No model pins or global reviewer overrides are configured here.
+
+For build-only routing, optionally add `reviewModels` to `build.workflow.json`, with `core` and/or `selector` set to a real model string accepted by your configured provider. For example, the shape is `"reviewModels": { "core": "<provider>/<core-model>", "selector": "<provider>/<selector-model>" }` (placeholders, not usable model IDs). Omit either key to inherit that agent's normal defaults; omit the whole object to inherit both. Specialists also inherit their defaults initially. These settings do not affect standalone `/review`, synthesis, finalization, or global reviewer configuration. No cheaper or different model tier is guaranteed without explicit configuration. Payload tests establish routing instructions, not live provider availability; verify actual routing in a disposable runtime before relying on explicit pins.
 
 ### Durable multi-increment mode (Ralph)
 
