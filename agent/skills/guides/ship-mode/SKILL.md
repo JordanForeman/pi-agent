@@ -5,7 +5,7 @@ injection: explicit
 disable-model-invocation: true
 ---
 
-An explicit `/quick-commit` invocation authorizes one commit containing only the current objective's reviewed files. An explicit `/quick-pr` invocation authorizes the same scoped commit when needed, a normal push of the current topic branch, and creation or update of its current pull request. Direct `/skill:ship-mode <exact commit or PR objective>` invocation grants the corresponding bounded authorization. Do not ask again for those exact actions.
+An explicit `/quick-commit` invocation authorizes one commit containing only the current objective's reviewed files. An explicit `/quick-pr` invocation authorizes the same scoped commit when needed, a normal push of the current topic branch, and creation or update of its current pull request. An explicit `/vibe` invocation additionally authorizes creating or selecting one local topic branch before implementation, then publishing the clean reviewed result as a pull request. Direct `/skill:ship-mode <exact commit or PR objective>` invocation grants the corresponding bounded authorization. Do not ask again for those exact actions.
 
 Inspect branch, worktree, attribution, diff, and validation before acting. Exclude unrelated or unexpected files and report them. The authorization expires after the requested commit or pull-request update.
 

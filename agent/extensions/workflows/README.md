@@ -6,7 +6,8 @@ Multi-phase, lifecycle-managed orchestration built on the shared `WorkflowEngine
 
 | File | Commands | Pattern | Phases |
 |---|---|---|---|
-| `build.ts` + `build.workflow.json` + `extension-core/review.workflow.json` | `/build`, `/build:status` | Bounded one-writer implementation loop | plan → implement → shared review → fix/re-review → summarize |
+| `build.ts` + `build.workflow.json` + `extension-core/review.workflow.json` | `/build`, `/build:status`, `/vibe`, `/vibe:status` | One-writer implementation loops | prepare topic branch (`vibe`) → plan → implement → shared review → fix/re-review → publish PR (`vibe`) → summarize |
+| `plan.ts` | `/plan` | Focused read-only planning with Codex Astra | inspect → plan |
 | `pr-review.ts` + `extension-core/review.workflow.json` | `/review`, `/review:status` | Triage + shared parallel review | triage → parallel review → synthesize |
 | `research.ts` | `/research`, `/research:status` | Bounded read-only investigation | research → cited evidence report |
 | `verify.ts` | `/verify`, `/verify:status` | Project plus real-surface proof | verify → evidence verdict |
@@ -14,6 +15,8 @@ Multi-phase, lifecycle-managed orchestration built on the shared `WorkflowEngine
 | `triage.ts` | `/triage`, `/triage:status` | Parallel + conditional | code/log investigation → synthesis → repeat when critical gaps remain |
 
 The build and PR-review parents own fanout through the shared review contract. Specialist reviewers inspect supplied context and repository state directly; ordinary child roles do not launch nested subagents. Workflow skill arrays are complete task-specific overrides: each task must list every skill it needs, including its interaction mode, rather than relying on role defaults.
+
+Planning and review tasks use `openai-codex/gpt-6-astra`. Implementation, fix, branch, and publication tasks use `openai-codex/gpt-5.6-sol`. `/vibe` runs up to ten review and fix rounds. It requires structured proof of a verified GitHub pull request before finalizing. Safety, ownership, credential, resource, or product-decision blockers stop the workflow without publishing.
 
 ## Conventions
 

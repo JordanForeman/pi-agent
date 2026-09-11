@@ -17,6 +17,8 @@ import { WorkflowExtensionCore } from "../../extension-core/workflow-extension-c
 import { createSharedReviewPhase, createSharedReviewSynthesisPhase } from "../../extension-core/review-contract";
 
 type BuildVerdict = "BUILD_CLEAN" | "BUILD_FIXES_NEEDED" | "BUILD_BLOCKED";
+type BuildMode = "build" | "vibe";
+type VibePreparation = { status: "READY"; repository: string; branch: string; base: string };
 
 type BuildTaskSpec = {
   agent: string;
@@ -43,6 +45,7 @@ type BuildTemplate = {
 };
 
 const SPECIALIST_ROLES = ["design-reviewer", "rails-reviewer", "frontend-reviewer", "testing-reviewer"] as const;
+const VIBE_MAX_FIX_ROUNDS = 10;
 type SelectionDecision = { agent: string; applicable: boolean; reason: string };
 
 const BUILD_TEMPLATE = loadBuildTemplate();
@@ -212,6 +215,45 @@ function extractBuildVerdict(result: PhaseResult): BuildVerdict | null {
   return match && tokens.length === 1 ? match[1] as BuildVerdict : null;
 }
 
+function parseVibePreparation(result: PhaseResult): VibePreparation | null {
+  if (!successfulPhase(result, ["git-ops"])) return null;
+  try {
+    const raw = result.outputs[0].result;
+    const propertyCount = [...raw.matchAll(/"(?:\\.|[^"\\])*"\s*:/g)].length;
+    const value = JSON.parse(raw);
+    if (propertyCount !== 4 || !value || Array.isArray(value) || Object.keys(value).sort().join() !== "base,branch,repository,status"
+      || value.status !== "READY" || typeof value.repository !== "string"
+      || typeof value.branch !== "string" || typeof value.base !== "string") return null;
+    const repository = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
+    const ref = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/;
+    if (!repository.test(value.repository) || !ref.test(value.branch) || !ref.test(value.base)
+      || value.branch === value.base || value.branch.includes("..") || value.branch.includes("//")) return null;
+    return value as VibePreparation;
+  } catch {
+    return null;
+  }
+}
+
+function extractPullRequestUrl(result: PhaseResult, context: WorkflowContext): string | null {
+  if (!successfulPhase(result, ["git-ops"])) return null;
+  try {
+    const raw = result.outputs[0].result;
+    const propertyCount = [...raw.matchAll(/"(?:\\.|[^"\\])*"\s*:/g)].length;
+    const value = JSON.parse(raw);
+    if (propertyCount !== 8 || !value || Array.isArray(value)
+      || Object.keys(value).sort().join() !== "branch,commit,prState,prUrl,remoteCommit,repository,scope,status"
+      || value.status !== "PUBLISHED" || value.prState !== "OPEN" || value.scope !== "OBJECTIVE_ONLY"
+      || typeof value.repository !== "string" || typeof value.branch !== "string"
+      || typeof value.commit !== "string" || typeof value.remoteCommit !== "string" || typeof value.prUrl !== "string"
+      || value.repository !== context.state.repository || value.branch !== context.state.branch
+      || !/^[0-9a-f]{40}$/i.test(value.commit) || value.remoteCommit !== value.commit) return null;
+    const match = value.prUrl.match(/^https:\/\/github\.com\/([^/]+\/[^/]+)\/pull\/\d+$/i);
+    return match?.[1] === value.repository ? value.prUrl : null;
+  } catch {
+    return null;
+  }
+}
+
 function parseSelection(result: PhaseResult | undefined, iteration: number): SelectionDecision[] | null {
   if (!successfulPhase(result, ["pr-triage"], iteration)) return null;
   try {
@@ -260,6 +302,10 @@ function fixRounds(context: WorkflowContext): number {
   return typeof context.state.fixRounds === "number" ? context.state.fixRounds : 0;
 }
 
+function maxFixRounds(mode: BuildMode): number {
+  return mode === "vibe" ? VIBE_MAX_FIX_ROUNDS : BUILD_TEMPLATE.maxFixRounds;
+}
+
 function templateTasks(tasks: BuildTaskSpec[]): PhaseTask[] {
   return tasks.map((task) => ({
     agent: task.agent,
@@ -270,7 +316,7 @@ function templateTasks(tasks: BuildTaskSpec[]): PhaseTask[] {
   }));
 }
 
-function transitionFor(phaseId: string): TransitionRule {
+function transitionFor(phaseId: string, mode: BuildMode): TransitionRule {
   if (phaseId === "finalize") return { type: "advance" };
   return {
     type: "conditional",
@@ -280,11 +326,24 @@ function transitionFor(phaseId: string): TransitionRule {
           ? extractBuildVerdict(result) : null;
         if (!verdict) return blockBuild(context, "Review prerequisites or synthesis failed, were missing, or were ambiguous.");
         context.state.finalVerdict = verdict;
-        if (verdict === "BUILD_FIXES_NEEDED" && fixRounds(context) < BUILD_TEMPLATE.maxFixRounds) {
+        if (verdict === "BUILD_FIXES_NEEDED" && fixRounds(context) < maxFixRounds(mode)) {
           context.state.fixRounds = fixRounds(context) + 1;
           return "fix";
         }
+        if (verdict === "BUILD_CLEAN" && mode === "vibe") return "publish";
         return "finalize";
+      }
+      if (phaseId === "publish") {
+        const prUrl = extractPullRequestUrl(result, context);
+        if (!prUrl) return blockBuild(context, "Publication failed or returned incomplete, contradictory, or unscoped proof.");
+        context.state.prUrl = prUrl;
+        return "finalize";
+      }
+      if (phaseId === "prepare") {
+        const preparation = parseVibePreparation(result);
+        if (!preparation) return blockBuild(context, "Repository preparation failed or did not prove a safe topic branch.");
+        Object.assign(context.state, preparation);
+        return "plan";
       }
       if (phaseId === "select-reviewers") {
         const decisions = parseSelection(result, fixRounds(context) + 1);
@@ -317,19 +376,20 @@ function transitionFor(phaseId: string): TransitionRule {
   };
 }
 
-function formatBuildContext(context: WorkflowContext): string {
+function formatBuildContext(context: WorkflowContext, mode: BuildMode): string {
   const format = (phaseId: string, result: PhaseResult) => result.outputs
     .map((output) => `### ${phaseId} — ${output.agent} (${output.status})\n${output.result}`)
     .join("\n\n");
   // Current evidence first; fix history is separate implementation evidence, not active findings.
-  const activeIds = ["synthesize", "core-review", "select-reviewers", "specialist-review"];
+  const activeIds = ["publish", "synthesize", "core-review", "select-reviewers", "specialist-review"];
   const active = activeIds.filter((id) => context.phases[id]).map((id) => format(id, context.phases[id]));
   const fixEvidence = (context.state.fixEvidence as PhaseResult[]).map((result) => format(`fix evidence ${result.iteration}`, result));
   const background = Object.entries(context.phases).filter(([id]) => !activeIds.includes(id)).map(([id, result]) => format(id, result));
   return [
     "Build state:",
     `- Final verdict: ${typeof context.state.finalVerdict === "string" ? context.state.finalVerdict : "pending"}`,
-    `- Fix rounds: ${fixRounds(context)}/${BUILD_TEMPLATE.maxFixRounds}`,
+    `- Fix rounds: ${fixRounds(context)}/${maxFixRounds(mode)}`,
+    ...(context.state.prUrl ? [`- Pull request: ${context.state.prUrl}`] : []),
     ...(context.state.blockedReason ? [`- Blocked reason: ${context.state.blockedReason}`] : []),
     "",
     ...active,
@@ -339,6 +399,7 @@ function formatBuildContext(context: WorkflowContext): string {
 }
 
 export function createBuildWorkflow(commandName: string): WorkflowDefinition {
+  const mode: BuildMode = commandName === "vibe" ? "vibe" : "build";
   const buildPhases = Object.fromEntries(
     BUILD_TEMPLATE.phases.map((phase) => [phase.id, {
       id: phase.id,
@@ -347,7 +408,7 @@ export function createBuildWorkflow(commandName: string): WorkflowDefinition {
       // Retain raw evidence so an empty successful child cannot pass a receipt-only check.
       contextMode: "full",
       tasks: templateTasks(phase.tasks),
-      transition: transitionFor(phase.id),
+      transition: transitionFor(phase.id, mode),
     }]),
   ) as Record<string, WorkflowDefinition["phases"][number]>;
 
@@ -360,9 +421,9 @@ export function createBuildWorkflow(commandName: string): WorkflowDefinition {
 
   return {
     id: commandName,
-    name: "Build",
-    description: BUILD_TEMPLATE.description,
-    formatContext: formatBuildContext,
+    name: mode === "vibe" ? "Vibe" : "Build",
+    description: mode === "vibe" ? "Autonomous plan, build, review/fix, and pull-request publication" : BUILD_TEMPLATE.description,
+    formatContext: (context) => formatBuildContext(context, mode),
     // Build gates require lossless evidence in synthesis AND fix dispatches.
     // Disable aggregate truncation, rather than substituting a larger finite cap.
     // Other workflows retain their bounded default; provider limits still apply.
@@ -376,14 +437,38 @@ export function createBuildWorkflow(commandName: string): WorkflowDefinition {
       },
     }),
     phases: [
+      ...(mode === "vibe" ? [{
+        id: "prepare",
+        label: "🌿 Prepare topic branch",
+        execution: "sequential" as const,
+        contextMode: "full" as const,
+        tasks: [{
+          agent: "git-ops",
+          requires: ["shell"],
+          skill: ["git-attribution", "git-ops", "ship-mode"],
+          model: "openai-codex/gpt-5.6-sol",
+          task: [
+            "Prepare a safe topic branch for this /vibe objective: {input}",
+            "The explicit /vibe invocation authorizes inspection and creation of one local topic branch for this objective.",
+            "Confirm the repository root, current branch, worktree status, remotes, default branch, and any existing pull request before making changes.",
+            "If the current branch is protected or shared, create and switch to a clearly named topic branch without rewriting history. If it is already a suitable topic branch, keep it.",
+            "Stop on unrelated or ambiguous dirty state, missing repository ownership, or any need for destructive operations, force, credentials, or shared writes.",
+            "Do not commit, push, open a pull request, or edit project files in this phase.",
+            "On success, return only JSON with exactly these fields: {\"status\":\"READY\",\"repository\":\"OWNER/REPO\",\"branch\":\"topic-branch\",\"base\":\"base-branch\"}.",
+            "Use the canonical GitHub OWNER/REPO from the configured remote. The branch must differ from the base branch.",
+            "If any stop condition applies, report the blocker instead. Do not return READY.",
+          ].join("\n"),
+        }],
+        transition: transitionFor("prepare", mode),
+      }] : []),
       buildPhases.plan,
       buildPhases.implement,
-      { ...core, id: "core-review", label: "🔎 Core correctness and safety review", execution: "sequential", contextMode: "full", transition: transitionFor("core-review") },
+      { ...core, id: "core-review", label: "🔎 Core correctness and safety review", execution: "sequential", contextMode: "full", transition: transitionFor("core-review", mode) },
       {
         ...BUILD_TEMPLATE.selection,
         contextMode: "full",
         tasks: selectorTasks,
-        transition: transitionFor("select-reviewers"),
+        transition: transitionFor("select-reviewers", mode),
       },
       {
         id: "specialist-review",
@@ -393,7 +478,7 @@ export function createBuildWorkflow(commandName: string): WorkflowDefinition {
         tasks: (context) => createSharedReviewPhase(reviewContext,
           (context.state.selection as SelectionDecision[]).filter((decision) => decision.applicable).map((decision) => decision.agent),
         ).tasks as PhaseTask[],
-        transition: transitionFor("specialist-review"),
+        transition: transitionFor("specialist-review", mode),
       },
       createSharedReviewSynthesisPhase({
         verdict_instructions: [
@@ -410,8 +495,34 @@ export function createBuildWorkflow(commandName: string): WorkflowDefinition {
           "3. Validation still required",
           "4. Decision needed, if blocked",
         ].join("\n"),
-      }, transitionFor("synthesize")),
+      }, transitionFor("synthesize", mode)),
       buildPhases.fix,
+      ...(mode === "vibe" ? [{
+        id: "publish",
+        label: "🚀 Publish pull request",
+        execution: "sequential" as const,
+        contextMode: "full" as const,
+        tasks: [{
+          agent: "git-ops",
+          requires: ["shell"],
+          skill: ["git-attribution", "git-ops", "pr-descriptions", "ship-mode"],
+          model: "openai-codex/gpt-5.6-sol",
+          task: [
+            "Publish the clean reviewed work for: {input}",
+            "The explicit /vibe invocation authorizes one scoped commit when needed, a normal push of the current topic branch, and creation or update of its pull request.",
+            "Inspect the repository root, current branch, status, diff, attribution, and validation evidence before acting. Never commit unrelated or unexpected files.",
+            "Stage only files that belong to this objective, verify the staged diff, create a conventional attributed commit with a useful body when changes are uncommitted, and push without force.",
+            "Create or update the pull request with a concise description focused on why the change exists and how to use /vibe. Do not merge it.",
+            "Afterward, fetch and verify the published commit is on the remote branch and the pull request is open for that branch.",
+            "On success, return only JSON with exactly these fields: {\"status\":\"PUBLISHED\",\"repository\":\"OWNER/REPO\",\"branch\":\"topic-branch\",\"commit\":\"40-character SHA\",\"remoteCommit\":\"40-character SHA\",\"prUrl\":\"https://github.com/OWNER/REPO/pull/NUMBER\",\"prState\":\"OPEN\",\"scope\":\"OBJECTIVE_ONLY\"}.",
+            "Set scope to OBJECTIVE_ONLY only after verifying that the commit contains no unrelated or unexpected files. The two commit fields must match.",
+            "Stop for credentials, protected/shared branch writes, history rewrites, destructive operations, ambiguous ownership, or changes outside the objective. If any stop condition applies, report the blocker instead of returning PUBLISHED.",
+            "Workflow evidence:",
+            "{context}",
+          ].join("\n"),
+        }],
+        transition: transitionFor("publish", mode),
+      }] : []),
       buildPhases.finalize,
     ],
   };
@@ -419,6 +530,7 @@ export function createBuildWorkflow(commandName: string): WorkflowDefinition {
 
 class BuildExtension extends WorkflowExtensionCore {
   private readonly buildEngine = new WorkflowEngine(this.pi, createBuildWorkflow("build"));
+  private readonly vibeEngine = new WorkflowEngine(this.pi, createBuildWorkflow("vibe"));
 
   constructor(pi: ExtensionAPI) {
     super(pi, {
@@ -431,11 +543,15 @@ class BuildExtension extends WorkflowExtensionCore {
   protected registerExtension(): void {
     this.registerLoopCommand("build", this.buildEngine);
     this.registerStatusCommand("build:status", this.buildEngine, "build");
+    this.registerLoopCommand("vibe", this.vibeEngine);
+    this.registerStatusCommand("vibe:status", this.vibeEngine, "vibe");
   }
 
-  private registerLoopCommand(name: "build", engine: WorkflowEngine): void {
+  private registerLoopCommand(name: BuildMode, engine: WorkflowEngine): void {
     this.pi.registerCommand(name, {
-      description: `Start a ${name}: plan → implement → core review → select specialists → synthesis → bounded fixes`,
+      description: name === "vibe"
+        ? "Autonomously plan, build, review/fix, and open a pull request"
+        : "Plan, implement, review, and apply bounded fixes",
       handler: async (args, ctx) => {
         const input = args.trim();
         if (!input) {
@@ -474,8 +590,9 @@ class BuildExtension extends WorkflowExtensionCore {
           `${definition.name}: ${engineState}`,
           `Objective: ${context.input}`,
           phase ? `Current: ${phase.label}` : "Current: (none)",
-          `Fix rounds: ${rounds}/${BUILD_TEMPLATE.maxFixRounds}`,
+          `Fix rounds: ${rounds}/${maxFixRounds(label === "vibe" ? "vibe" : "build")}`,
           `Verdict: ${verdict}`,
+          ...(context.state.prUrl ? [`Pull request: ${context.state.prUrl}`] : []),
         ].join("\n"), "info");
       },
     });
