@@ -20,8 +20,21 @@ export function normalizeSubagentCompletions(result, isError, remainingTaskCount
         const count = details.mode === "single" ? 1 : normalizedCount(remainingTaskCount);
         return Array.from({ length: count }, () => completion(result, true));
       }
-      const children = details.mode === "single" ? details.results.slice(0, 1) : details.results;
-      return children.map((child) => completion(child, envelopeError));
+      // Separate foreground calls may deliver a phase in parts. Reject excess,
+      // not partial batches; chain children remain one legacy completion below.
+      const maximum = details.mode === "single" ? Math.min(1, normalizedCount(remainingTaskCount)) : normalizedCount(remainingTaskCount);
+      const cardinalityError = details.results.length > maximum
+        ? `Unexpected subagent result cardinality: ${details.mode} returned ${details.results.length}, at most ${maximum} expected. Restart explicitly.`
+        : undefined;
+      return details.results.map((child) => {
+        const entry = completion(child, envelopeError);
+        return {
+          ...entry,
+          // Preserve both envelope diagnostics and child artifact metadata.
+          ...(envelopeError ? { toolResult: { ...child, envelopeResult: result } } : {}),
+          ...(cardinalityError ? { stopReason: entry.stopReason ?? cardinalityError } : {}),
+        };
+      });
     }
     if (details.mode === "parallel") return [];
   }
@@ -46,8 +59,8 @@ function completion(result, fallbackError) {
   const entry = result && typeof result === "object" ? result : {};
   const stopReason = entry.interrupted ? "Subagent interrupted; explicit next action required."
     : entry.detached ? "Subagent detached; explicit next action required." : undefined;
-  const failed = stopReason || entry.error || entry.isError === true
-    || (typeof entry.exitCode === "number" ? entry.exitCode !== 0 : fallbackError);
+  const failed = stopReason || fallbackError || entry.error || entry.isError === true
+    || (typeof entry.exitCode === "number" && entry.exitCode !== 0);
   return {
     agent: typeof entry.agent === "string" ? entry.agent : null,
     rawOutput: extractResultText(result),
@@ -65,15 +78,11 @@ function extractResultText(result) {
     if (typeof result.content === "string") return result.content;
     if (Array.isArray(result.content)) {
       return result.content
-        .filter((item) => item && typeof item === "object" && item.type === "text")
+        .filter((item) => item && typeof item === "object" && item.type === "text" && typeof item.text === "string")
         .map((item) => item.text)
         .join("\n");
     }
-    try {
-      return JSON.stringify(result, null, 2);
-    } catch {
-      return String(result);
-    }
   }
-  return String(result ?? "");
+  // Metadata remains in toolResult for diagnostics, never prerequisite evidence.
+  return "";
 }

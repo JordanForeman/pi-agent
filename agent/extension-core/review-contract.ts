@@ -14,6 +14,7 @@ type ReviewTaskSpec = {
   agent: string;
   requires: PhaseCapability[];
   skill?: string[];
+  model?: string;
   lines: string[];
 };
 
@@ -35,8 +36,17 @@ type TemplateReplacements = Record<string, string>;
 
 const REVIEW_CONTRACT = loadReviewContract();
 
-export function createSharedReviewPhase(replacements: TemplateReplacements): PhaseDefinition {
-  return materializePhase(REVIEW_CONTRACT.review, replacements, { type: "advance" });
+/** Omitted agents preserves standalone /review's fixed fan-out. */
+export function createSharedReviewPhase(replacements: TemplateReplacements, agents?: readonly string[]): PhaseDefinition {
+  const phase = materializePhase(REVIEW_CONTRACT.review, replacements, { type: "advance" });
+  if (agents !== undefined) {
+    const tasks = phase.tasks as PhaseTask[];
+    if (new Set(agents).size !== agents.length || agents.some((agent) => !tasks.some((task) => task.agent === agent))) {
+      throw new Error("Unknown or duplicate shared reviewer role");
+    }
+    phase.tasks = agents.map((agent) => tasks.find((task) => task.agent === agent)!);
+  }
+  return phase;
 }
 
 export function createSharedReviewSynthesisPhase(
@@ -62,6 +72,7 @@ function materializePhase(spec: ReviewPhaseSpec, replacements: TemplateReplaceme
       requires: task.requires,
       task: materializeLines(task.lines, replacements),
       ...(task.skill ? { skill: task.skill } : {}),
+      ...(task.model !== undefined ? { model: task.model } : {}),
     })),
     transition,
   };
@@ -144,6 +155,7 @@ function validateTaskSpec(value: unknown, phaseLabel: string, taskIndex: number)
     agent: asString(task.agent, `${phaseLabel}.tasks[${taskIndex}].agent`),
     requires: asCapabilities(task.requires, `${phaseLabel}.tasks[${taskIndex}].requires`),
     skill,
+    ...(task.model !== undefined ? { model: asString(task.model, `${phaseLabel}.tasks[${taskIndex}].model`) } : {}),
     lines,
   };
 }

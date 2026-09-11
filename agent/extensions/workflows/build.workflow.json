@@ -1,6 +1,35 @@
 {
   "description": "Plan, implement, review, fix, and re-review feature work with one writer",
   "maxFixRounds": 3,
+  "selection": {
+    "id": "select-reviewers",
+    "label": "🧭 Select relevant specialist reviews",
+    "execution": "sequential",
+    "contextMode": "full",
+    "tasks": [
+      {
+        "agent": "pr-triage",
+        "requires": ["shell"],
+        "skill": ["review-mode"],
+        "model": "openai-codex/gpt-6-astra",
+        "lines": [
+          "Inspect the current repository changes and core review for specialist applicability.",
+          "Do not edit files or run mutating commands. Do not delegate to other subagents.",
+          "The parent dispatches selected specialists; you only return applicability decisions.",
+          "For this build selection, replace your usual Markdown report with ONLY a JSON object (no fences or prose).",
+          "Schema: {\"decisions\":[{\"agent\":\"design-reviewer\",\"applicable\":true,\"reason\":\"file-specific evidence\"}, ...]}",
+          "Return exactly one decision for EACH of design-reviewer, rails-reviewer, frontend-reviewer, testing-reviewer, with no other roles or fields.",
+          "Every applicable value must be a JSON boolean. Every reason must be nonempty and cite inspected file paths/change evidence, including exclusions.",
+          "Select design for meaningful architecture/API/abstraction changes; rails for Ruby/Rails; frontend for browser/UI/frontend behavior (not merely any TypeScript file).",
+          "Select testing for changed production behavior, tests, or validation contracts, even when no test files changed. If uncertain, select the relevant role with evidence.",
+          "All four decisions may be false when evidence supports it. The generalized core review always runs independently.",
+          "Original objective: {input}",
+          "Current-round context:",
+          "{context}"
+        ]
+      }
+    ]
+  },
   "phases": [
     {
       "id": "plan",
@@ -11,6 +40,7 @@
           "agent": "planner",
           "requires": [],
           "skill": ["search-before-write", "validation-discovery", "build-mode"],
+          "model": "openai-codex/gpt-6-astra",
           "lines": [
             "Create a concise implementation plan for: {input}",
             "",
@@ -36,6 +66,7 @@
           "agent": "builder",
           "requires": ["filesystem-write", "shell"],
           "skill": ["search-before-write", "test-first", "validation-discovery", "avoid-over-engineering", "code-shape", "naming", "comments", "coupling", "error-signaling", "testing", "build-mode"],
+          "model": "openai-codex/gpt-5.6-sol",
           "lines": [
             "Implement the planned feature work for: {input}",
             "",
@@ -62,6 +93,7 @@
           "agent": "builder",
           "requires": ["filesystem-write", "shell"],
           "skill": ["search-before-write", "test-first", "validation-discovery", "avoid-over-engineering", "code-shape", "naming", "comments", "coupling", "error-signaling", "testing", "build-mode"],
+          "model": "openai-codex/gpt-5.6-sol",
           "lines": [
             "Apply only the accepted in-scope fixes from the synthesized review verdict.",
             "",
@@ -71,7 +103,7 @@
             "",
             "Rules:",
             "- You are the only writer for this fix phase.",
-            "- Do not apply optional/deferred feedback unless it is tiny, safe, and clearly inside scope.",
+            "- Do not apply optional/deferred feedback; apply accepted in-scope fixes only.",
             "- Do not make unapproved product, scope, security, destructive, or architecture decisions.",
             "- Run focused validation for the fixes and report commands plus outcomes."
           ]
@@ -88,6 +120,7 @@
           "agent": "reviewer",
           "requires": [],
           "skill": ["concise-output"],
+          "model": "openai-codex/gpt-6-astra",
           "lines": [
             "Produce the final build summary for: {input}",
             "Do not edit files.",
@@ -97,7 +130,8 @@
             "{context}",
             "",
             "Include:",
-            "- final verdict and whether the work is ready for parent review",
+            "- report the workflow's recorded final verdict exactly; never upgrade blocked, failed, or capped work to clean",
+            "- whether the work is ready for parent review (not final reviewed completion)",
             "- changed files to inspect",
             "- validation evidence and remaining validation gaps",
             "- remaining blockers or deferred follow-ups",

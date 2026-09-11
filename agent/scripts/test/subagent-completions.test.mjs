@@ -15,14 +15,14 @@ const result = (mode, results) => ({
   details: { mode, results },
 });
 
-function engineFixture(t, count = 1, transition = { type: "advance" }, execution = count > 1 ? "parallel" : "sequential") {
+function engineFixture(t, count = 1, transition = { type: "advance" }, execution = count > 1 ? "parallel" : "sequential", taskOverrides = []) {
   const handlers = new Map();
   const messages = [];
   const notices = [];
   const ctx = { hasUI: true, ui: { notify: (text) => notices.push(text), setStatus() {} } };
   const pi = { on: (event, handler) => handlers.set(event, handler), sendUserMessage: (text) => messages.push(text) };
   const definition = { id: "test", name: "Test", phases: [
-    { id: "first", label: "First", execution, tasks: Array.from({ length: count }, (_, i) => ({ agent: `worker-${i}`, requires: [], task: "Work" })), transition },
+    { id: "first", label: "First", execution, tasks: Array.from({ length: count }, (_, i) => ({ agent: `worker-${i}`, requires: [], task: "Work", ...taskOverrides[i] })), transition },
     { id: "next", label: "Next", execution: "sequential", tasks: [{ agent: "worker", requires: [], task: "Next" }], transition: { type: "advance" } },
   ] };
   const engine = new WorkflowEngine(pi, definition);
@@ -209,6 +209,36 @@ for (const count of [1, 3]) {
   });
 }
 
+for (const [count, execution] of [[1, "sequential"], [1, "parallel"], [3, "parallel"], [3, "sequential"]]) {
+  test(`task model overrides survive ${execution} dispatch (${count} tasks)`, (t) => {
+    // Deliberately synthetic IDs: payload tests do not claim provider availability.
+    const overrides = [{ model: "test-provider/core:high", skill: ["testing"] }, { model: "test-provider/selector" }];
+    const h = engineFixture(t, count, { type: "advance" }, execution, overrides);
+    const calls = [...h.messages[0].matchAll(/```json\n([\s\S]*?)\n```/g)].map((match) => JSON.parse(match[1]));
+    const tasks = calls.flatMap((call) => call.tasks ?? [call]);
+    assert.equal(tasks.length, count);
+    for (const call of calls) assert.equal(call.async, false);
+    tasks.forEach((task, index) => {
+      assert.equal(task.model, overrides[index]?.model);
+      assert.equal(Object.hasOwn(task, "model"), index < overrides.length);
+      assert.equal(task.agent, `worker-${index}`);
+      assert.equal(task.task, "Work");
+    });
+    assert.deepEqual(tasks[0].skill, ["testing"]);
+    const instructions = h.emit("before_agent_start", { systemPrompt: "base" }).systemPrompt;
+    for (const override of overrides.slice(0, count)) assert.ok(instructions.includes(override.model));
+  });
+}
+
+for (const count of [1, 3]) {
+  test(`omitted models preserve inheritance (${count} tasks)`, (t) => {
+    const h = engineFixture(t, count);
+    const call = JSON.parse(h.messages[0].match(/```json\n([\s\S]*?)\n```/)[1]);
+    for (const task of call.tasks ?? [call]) assert.equal(Object.hasOwn(task, "model"), false);
+    assert.doesNotMatch(h.emit("before_agent_start", { systemPrompt: "base" }).systemPrompt, /Model:/);
+  });
+}
+
 for (const async of [undefined, true]) {
   test(`non-foreground dispatch is blocked before defaults can launch it (async=${async})`, (t) => {
     const h = engineFixture(t);
@@ -265,7 +295,7 @@ test("single result preserves agent, final output, status and child artifact con
 
 test("one parallel tool result yields five independent completions, not one batch", () => {
   const entries = ["design-reviewer", "rails-reviewer", "frontend-reviewer", "testing-reviewer", "security-reviewer"].map((agent) => child(agent));
-  const completions = normalizeSubagentCompletions(result("parallel", entries), false);
+  const completions = normalizeSubagentCompletions(result("parallel", entries), false, entries.length);
   assert.equal(completions.length, 5);
   completions.forEach((completion, index) => {
     assert.deepEqual(completion, {
@@ -278,7 +308,7 @@ test("one parallel tool result yields five independent completions, not one batc
   });
 });
 
-test("parallel status uses each child's exit/error rather than the batch status", () => {
+test("failed envelope dominates child status without hiding child diagnostics", () => {
   const entries = [
     child("passed"),
     child("nonzero", { exitCode: 2 }),
@@ -286,12 +316,64 @@ test("parallel status uses each child's exit/error rather than the batch status"
     child("flagged", { isError: true }),
   ];
   for (const batchError of [false, true]) {
-    assert.deepEqual(normalizeSubagentCompletions(result("parallel", entries), batchError).map((entry) => entry.status), ["success", "error", "error", "error"]);
+    assert.deepEqual(normalizeSubagentCompletions(result("parallel", entries), batchError, entries.length).map((entry) => entry.status), batchError ? ["error", "error", "error", "error"] : ["success", "error", "error", "error"]);
   }
 });
 
-test("single mode contributes at most one completion", () => {
-  assert.equal(normalizeSubagentCompletions(result("single", [child("first"), child("extra")]), false).length, 1);
+for (const mode of ["single", "parallel"]) test(`${mode} rejects excess children without discarding trailing failure`, () => {
+  const entries = [child("first"), child("extra", { exitCode: 1, finalOutput: "Trailing blocker" })];
+  const completions = normalizeSubagentCompletions(result(mode, entries), false, 1);
+  assert.equal(completions.length, 2);
+  assert.ok(completions.every((entry) => /cardinality/i.test(entry.stopReason)));
+  assert.equal(completions[1].status, "error");
+  assert.equal(completions[1].rawOutput, "Trailing blocker");
+});
+
+for (const mode of ["single", "parallel"]) test(`${mode} excess completion halts even conditional transitions`, (t) => {
+  let callbacks = 0;
+  const h = engineFixture(t, 1, { type: "conditional", decide: () => { callbacks++; return "next"; } });
+  h.result(result(mode, [child("first"), child("extra", { exitCode: 1 })]));
+  h.emit("agent_end");
+  assert.equal(callbacks, 0);
+  assert.equal(h.engine.getStatus().engineState, "failed");
+  assert.equal(h.engine.getStatus().context.phases.first.outputs.length, 2);
+  h.assertReleased();
+});
+
+test("parallel partial deliveries and progress updates do not consume extra work", (t) => {
+  const h = engineFixture(t, 3);
+  h.emit("tool_execution_update", { toolName: "subagent", partialResult: result("parallel", [child("progress")]) });
+  h.result(result("parallel", [child("one"), child("two")]));
+  h.emit("agent_end");
+  assert.equal(h.engine.getStatus().context.currentPhase, "first");
+  h.result(result("parallel", [child("three")]));
+  h.emit("agent_end");
+  assert.equal(h.engine.getStatus().context.currentPhase, "next");
+});
+
+test("extra later delivery before agent_end cannot be silently dropped", (t) => {
+  const h = engineFixture(t);
+  h.result(result("single", [child("first")]));
+  h.result(result("single", [child("extra", { exitCode: 1 })]), false, "extra-call");
+  h.emit("agent_end");
+  assert.equal(h.engine.getStatus().engineState, "failed");
+  assert.equal(h.engine.getStatus().context.phases.first.outputs.length, 2);
+});
+
+for (const eventError of [false, true]) test(`zero-exit child cannot override envelope error (event=${eventError})`, () => {
+  const envelope = { ...result("single", [child("reviewer")]), isError: !eventError };
+  const [entry] = normalizeSubagentCompletions(envelope, eventError);
+  assert.equal(entry.status, "error");
+  assert.equal(entry.rawOutput, envelope.details.results[0].finalOutput);
+  assert.strictEqual(entry.toolResult.envelopeResult, envelope);
+});
+
+test("metadata is diagnostics, not genuine output", () => {
+  for (const value of [{ agent: "planner", exitCode: 0 }, { artifactPaths: { outputPath: "/tmp/report.md" } }, null, 42, { content: [{ type: "text", text: {} }] }]) {
+    const [entry] = normalizeSubagentCompletions(value, false);
+    assert.equal(entry.rawOutput, "");
+    assert.strictEqual(entry.toolResult, value);
+  }
 });
 
 test("single child failure overrides a successful tool envelope", () => {

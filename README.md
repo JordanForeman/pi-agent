@@ -63,7 +63,7 @@ The added guides are also explicitly invocable as `/skill:design-rationale`, `/s
 
 Interaction modes are explicit, non-sticky operating envelopes: `/skill:research-mode`, `/skill:build-mode`, `/skill:verify-mode`, `/skill:review-mode`, and `/skill:ship-mode`. Invoking one authorizes routine actions inside that objective's documented boundary without repeated confirmation. The scope ends with the objective; modes do not bypass runtime guards, OS permissions, credentials, protected/shared branch rules, or ownership checks.
 
-Executable workflows are `/build`, `/research`, `/verify`, `/tdd`, `/triage`, and `/review`; each has a corresponding `:status` command. The research and verification workflows use `scratch_workspace` for disposable clones and fixtures. That tool creates roots directly under the OS temp directory, tracks exact session ownership, and removes only roots it created. Pi gives extension commands precedence over same-named prompt templates, so executable commands win prompt-name collisions while their extensions are loaded. Physical prompt paths are canonicalized, so loading this package and the corrected dotfiles category paths does not register the same file twice.
+Executable workflows are `/plan`, `/build`, `/vibe`, `/research`, `/verify`, `/tdd`, `/triage`, and `/review`; all except `/plan` have a corresponding `:status` command. The research and verification workflows use `scratch_workspace` for disposable clones and fixtures. That tool creates roots directly under the OS temp directory, tracks exact session ownership, and removes only roots it created. Pi gives extension commands precedence over same-named prompt templates, so executable commands win prompt-name collisions while their extensions are loaded. Physical prompt paths are canonicalized, so loading this package and the corrected dotfiles category paths does not register the same file twice.
 
 Workflow phases run in the foreground (`async: false`), enforced at tool dispatch even when `pi-subagents` uses `asyncByDefault`. Disable `forceTopLevelAsync` for workflows. Cancellation (including an aborted parent signal), interrupted/detached children, and unsupported background acknowledgements fail the workflow and release its ownership without advancing or automatically resuming. After a blocked dispatch, remaining execution/resume calls in the same agent run stay blocked; read-only list/status/doctor calls remain available. If a background run was started despite the foreground contract, inspect/stop it before explicitly restarting the workflow; the workflow engine does not manage background jobs.
 
@@ -126,14 +126,25 @@ Choose the command that matches the interaction. The command selects a bounded o
 Use `/research <question>` for cited read-only investigation, `/verify <claim>` for project-contract plus real-surface evidence, and `/build <objective>` for normal feature work. It runs a bounded in-flight implementation loop:
 
 ```text
-planner → builder → parallel reviewers → synthesis → builder fix pass → re-review (max 3 fix rounds) → final summary
+planner → builder → core reviewer → pr-triage selection → relevant specialists (0–4) → synthesis
+                        ↑                                                        ↓
+                        └──────── builder fix pass (max 3 rounds) ───────────────┘
+                                                             clean/blocked/capped → final summary
 ```
 
-The loop keeps implementation and fix phases to a single writer (`builder`) while parallel review remains read-only. Review synthesis emits one of `BUILD_CLEAN`, `BUILD_FIXES_NEEDED`, or `BUILD_BLOCKED` to decide whether to fix, produce a blocked final summary for a user decision, or finalize cleanly.
+The loop keeps implementation and fix phases to a single writer (`builder`). The generalized `reviewer` always reviews correctness, regressions, safety, and security first. Existing `pr-triage` then returns strict JSON applicability decisions with nonempty evidence-based reasons for all four allowed specialists: `design-reviewer`, `rails-reviewer`, `frontend-reviewer`, and `testing-reviewer`. The parent dispatches only selected reviewers (parallel when multiple); a valid all-false selection goes directly to synthesis. The selector never delegates, and every phase dispatch remains foreground (`async: false`).
 
-`/review` remains the post-hoc diff review command (`pr-review.ts`); it should not mutate files. Keep `/review` and `/build` separate: review reports on existing changes, build is allowed to create or revise changes through the review loop.
+Synthesis must succeed with exactly one standalone verdict line: `Verdict: BUILD_CLEAN`, `Verdict: BUILD_FIXES_NEEDED`, or `Verdict: BUILD_BLOCKED`. Missing, malformed, ambiguous, or failed selection/review/synthesis evidence cannot authorize clean completion or fixes. After successful fixes, active review/selection/synthesis state is discarded and core review plus selection run again; fix evidence is retained separately. Three fix rounds is the hard maximum, and unresolved work finalizes honestly rather than being marked clean.
 
-The build-specific phase prompt/spec lives in `agent/extensions/workflows/build.workflow.json`; the shared review contract used by both `/build` and `/review` lives in `agent/extension-core/review.workflow.json`. `build.ts` only loads those specs and supplies transition logic. Phase tasks are already delegated to subagents by `WorkflowEngine`, and the JSON specs explicitly attach relevant standards/conventions skills to each phase.
+`/review` remains the post-hoc diff review command (`pr-review.ts`); it should not mutate files. Keep `/review` and `/build` separate: review reports on existing changes, build is allowed to create or revise changes through the review loop. `/plan` is an executable read-only planner, with the prompt template retained only as a fallback.
+
+Use `/vibe <objective>` when the desired terminal artifact is a pull request. It first verifies or creates a safe topic branch. It then runs up to ten review and fix rounds. It publishes only after a clean review and verified remote branch, commit, and open pull request. Safety, ownership, credentials, resource limits, or unresolved product decisions fail closed rather than forcing publication.
+
+The build-specific phase prompts, selector contract, and optional routing settings live in `agent/extensions/workflows/build.workflow.json`; the shared review prompts/skills used by `/build`, `/vibe`, and `/review` live in `agent/extension-core/review.workflow.json`. `build.ts` materializes the adaptive phases and supplies parsing and transition gates. Phase tasks are already delegated to subagents by `WorkflowEngine`, and the JSON specs explicitly attach relevant standards/conventions skills to each phase.
+
+Workflow `PhaseTask` definitions and the build/shared-review JSON task specs accept an optional non-empty `model` string. The engine includes it in the parent’s single/parallel foreground dispatch instructions; omitted fields preserve existing subagent model inheritance. Canonical TypeScript task metadata uses an unescaped literal model string after `requires` and optional `skill`. Validation checks metadata shape, not provider availability.
+
+Planning, triage, review, synthesis, and final summary tasks use `openai-codex/gpt-6-astra`. Implementation, fix, branch, and publication tasks use `openai-codex/gpt-5.6-sol`. Build-local `reviewModels.core` and `reviewModels.selector` overrides remain available. Payload tests establish routing instructions. Run `pi --list-models openai-codex` to confirm provider availability.
 
 ### Durable multi-increment mode (Ralph)
 

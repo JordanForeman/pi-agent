@@ -278,7 +278,7 @@ export class DisciplineGateExtension extends GuardianExtensionCore {
           `You signalled the task is complete:\n  ${params.summary}\n\n` +
           `Before declaring done, dispatch the generalized reviewer over the changes ` +
           `using the subagent tool:\n\n` +
-          `  subagent({ agent: "reviewer", task: "Review these changes for correctness, ` +
+          `  subagent({ agent: "reviewer", model: "openai-codex/gpt-6-astra", task: "Review these changes for correctness, ` +
           `safety, security, and quality. Files: ${fileList}. Original request context: ` +
           `${params.summary} Give a go/no-go verdict with file-specific evidence; ` +
           `distinguish blockers from nits." })\n\n` +

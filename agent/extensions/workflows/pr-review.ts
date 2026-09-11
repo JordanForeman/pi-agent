@@ -15,6 +15,7 @@ const PR_REVIEW_WORKFLOW: WorkflowDefinition = {
       tasks: [{
         agent: "pr-triage",
         requires: ["shell"],
+        model: "openai-codex/gpt-6-astra",
         task: [
           "Analyze the current changes and determine which review dimensions apply.",
           "",

@@ -162,4 +162,4 @@ When the parent agent invokes you, they'll provide either:
 - A diff directly: "Analyze this diff: [diff content]"
 - A request to analyze current changes: "Analyze the current branch changes"
 
-Your response should always follow the OUTPUT FORMAT above, providing clear, actionable guidance for the parallel review stage.
+Use the OUTPUT FORMAT above unless the parent supplies a stricter machine-readable selection contract (as in `/build`); then return only that contract. Never dispatch reviewers yourself. Provide evidence-based reasons for both inclusions and exclusions.
