@@ -3,12 +3,14 @@ import type {
   ExtensionCommandContext,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
+import { normalizeSubagentCompletions } from "./subagent-completions.mjs";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
 /** How a phase executes its tasks */
 export type PhaseExecution = "sequential" | "parallel";
 export type PhaseContextMode = "full" | "compact" | "file-only" | "none";
+export type PhaseCapability = "filesystem-write" | "shell";
 
 export interface WorkflowContextBudget {
   /** Max characters kept for one compacted subagent output */
@@ -55,6 +57,8 @@ export interface PhaseTask {
   skill?: string[];
   /** Optional name used in receipts when a tool result does not include the agent */
   label?: string;
+  /** Capabilities the selected agent must declare; validated statically by repository tooling */
+  requires: PhaseCapability[];
 }
 
 /** Definition of one workflow phase */
@@ -153,6 +157,10 @@ export class WorkflowEngine {
   private loopIterations: Record<string, number> = {};
   private listenersRegistered = false;
   private pendingTasks: PhaseTask[] = [];
+  private phaseStopReason: string | undefined;
+  // Survives finish()/ownership release until this agent run ends.
+  private dispatchStopReason: string | undefined;
+  private managementCalls = new Set<string>();
 
   constructor(
     private readonly pi: ExtensionAPI,
@@ -208,6 +216,7 @@ export class WorkflowEngine {
     this.pendingTaskOutputs = [];
     this.pendingTasks = [];
     this.expectedTaskCount = 0;
+    this.managementCalls.clear();
     if (WorkflowEngine.activeEngine === this) WorkflowEngine.activeEngine = null;
 
     if (ctx?.hasUI) {
@@ -245,11 +254,43 @@ export class WorkflowEngine {
     // Inject phase instructions into system prompt
     this.pi.on("before_agent_start", (event, ctx) => this.onBeforeAgentStart(event, ctx));
 
+    const resetRun = () => {
+      this.dispatchStopReason = undefined;
+      this.managementCalls.clear();
+    };
+    this.pi.on("agent_start", resetRun);
+    for (const event of ["session_start", "session_shutdown"] as const) {
+      this.pi.on(event, (_event, ctx) => {
+        this.abort(ctx, "ended with the session");
+        resetRun();
+      });
+    }
+
+    // Pi preflights siblings even after terminate:true. Ownership is not a run latch.
+    this.pi.on("tool_call", (event, ctx) => {
+      if (event.toolName !== "subagent") return;
+      this.managementCalls.delete(event.toolCallId);
+      if (!this.isActive() && !this.dispatchStopReason) return;
+      const action = event.input.action;
+      if (action !== undefined && action !== "resume"
+        && (!this.dispatchStopReason || ["list", "status", "doctor"].includes(action))) {
+        this.managementCalls.add(event.toolCallId);
+        return;
+      }
+      if (!this.dispatchStopReason && event.input.async === false && action !== "resume") return;
+      const reason = this.dispatchStopReason ?? "Workflow phases require async: false foreground execution; background/resume dispatch is unsupported. Restart explicitly.";
+      this.dispatchStopReason = reason;
+      if (this.isActive()) this.finish(ctx, "failed", reason);
+      return { block: true, reason, terminate: true };
+    });
+
     // Detect subagent completion
-    this.pi.on("tool_execution_end", (event) => this.onToolExecutionEnd(event));
+    this.pi.on("tool_execution_end", (event, ctx) => this.onToolExecutionEnd(event, ctx));
 
     // Detect end of agent turn — evaluate transitions
-    this.pi.on("agent_end", (_event, ctx) => this.onAgentEnd(ctx));
+    this.pi.on("agent_end", (_event, ctx) => {
+      try { this.onAgentEnd(ctx); } finally { resetRun(); }
+    });
   }
 
   private onBeforeAgentStart(
@@ -266,37 +307,55 @@ export class WorkflowEngine {
     };
   }
 
-  private onToolExecutionEnd(event: { toolName: string; result: unknown; isError: boolean }): void {
-    if (!this.isActive()) return;
+  private onToolExecutionEnd(event: { toolCallId: string; toolName: string; result: unknown; isError: boolean }, ctx: ExtensionContext): void {
     if (event.toolName !== "subagent") return;
+    // Status uses an empty single-mode envelope, including on error.
+    if (this.managementCalls.delete(event.toolCallId)) return;
+    if (!this.isActive()) return;
 
     const phase = this.definition.phases.find((p) => p.id === this.context.currentPhase);
     if (!phase) return;
 
-    const rawOutput = extractResultText(event.result);
-    const taskIndex = this.pendingTaskOutputs.length;
-    const task = this.pendingTasks[taskIndex];
-    const agent = extractAgentName(event.result) ?? this.fallbackAgentName(phase, task) ?? "unknown";
-    this.pendingTaskOutputs.push(
-      this.compactTaskOutput({
-        phase,
-        task,
-        rawOutput,
-        agent,
-        status: event.isError ? "error" : "success",
-        toolResult: event.result,
-      }),
-    );
+    const details = (event.result as { details?: { mode?: string; asyncId?: string } } | null)?.details;
+    if (details?.mode === "management") return;
+    if (ctx.signal?.aborted) this.phaseStopReason = "Subagent dispatch cancelled; restart the workflow explicitly.";
+    const remainingTaskCount = this.expectedTaskCount - this.pendingTaskOutputs.length;
+    const completions = normalizeSubagentCompletions(event.result, event.isError, remainingTaskCount);
+    if (details?.asyncId || completions.length === 0) {
+      this.phaseStopReason ??= details?.asyncId
+        ? `Unsupported background acknowledgement (${details.asyncId}); workflow requires foreground execution. Inspect/stop that run before restarting; it may still be running.`
+        : "Subagent cancelled or returned no completed work; restart the workflow explicitly.";
+      this.completeCurrentPhase(ctx);
+      return;
+    }
+    this.phaseStopReason ??= completions.find((completion) => completion.stopReason)?.stopReason;
+
+    for (const completion of completions) {
+      // A batch may contain more results than this phase requested.
+      if (this.pendingTaskOutputs.length >= this.expectedTaskCount) break;
+      const task = this.pendingTasks[this.pendingTaskOutputs.length];
+      this.pendingTaskOutputs.push(
+        this.compactTaskOutput({
+          ...completion,
+          phase,
+          task,
+          agent: completion.agent ?? this.fallbackAgentName(phase, task) ?? "unknown",
+        }),
+      );
+    }
 
     this.updatePhaseProgress();
+    if (this.phaseStopReason) this.completeCurrentPhase(ctx);
   }
 
   private onAgentEnd(ctx: ExtensionContext): void {
     if (this.engineState !== "awaiting_phase") return;
     if (!this.context.currentPhase) return;
 
+    if (ctx.signal?.aborted) this.phaseStopReason = "Subagent dispatch cancelled; restart the workflow explicitly.";
+
     // Check if we have enough outputs for the current phase
-    if (this.pendingTaskOutputs.length < this.expectedTaskCount) {
+    if (!this.phaseStopReason && this.pendingTaskOutputs.length < this.expectedTaskCount) {
       // Not all tasks complete yet — wait for more agent turns
       return;
     }
@@ -316,6 +375,7 @@ export class WorkflowEngine {
     this.context.currentPhase = phaseId;
     this.engineState = "awaiting_phase";
     this.phaseStartTime = performance.now();
+    this.phaseStopReason = undefined;
     this.pendingTaskOutputs = [];
     this.pendingTasks = [];
 
@@ -343,7 +403,7 @@ export class WorkflowEngine {
     if (!phase) return;
 
     const elapsed = Math.round(performance.now() - this.phaseStartTime);
-    const hasErrors = this.pendingTaskOutputs.some((o) => o.status === "error");
+    const hasErrors = Boolean(this.phaseStopReason) || this.pendingTaskOutputs.some((o) => o.status === "error");
 
     const result: PhaseResult = {
       phaseId,
@@ -361,6 +421,13 @@ export class WorkflowEngine {
         `${icon} Phase "${phase.label}" ${result.status} (${formatDuration(elapsed)})`,
         result.status === "completed" ? "info" : "warning",
       );
+    }
+
+    // Interrupted/pending work must never enter conditional or loop transitions.
+    if (this.phaseStopReason) {
+      this.dispatchStopReason = this.phaseStopReason;
+      this.finish(ctx, "failed", this.phaseStopReason);
+      return;
     }
 
     // Evaluate transition
@@ -482,6 +549,7 @@ export class WorkflowEngine {
     }
 
     lines.push("");
+    lines.push("Use explicit async: false for every phase dispatch (foreground only). Do not resume interrupted/detached children automatically.");
     lines.push("After the subagent(s) complete, summarize the outcome briefly. The workflow engine will advance to the next phase.");
     lines.push("");
     lines.push("**Do not skip phases or execute future phases prematurely.**");
@@ -503,6 +571,7 @@ export class WorkflowEngine {
       lines.push("");
       lines.push("```json");
       lines.push(JSON.stringify({
+        async: false,
         tasks: tasks.map((t) => ({
           agent: t.agent,
           task: this.resolveTemplate(t.task),
@@ -516,6 +585,7 @@ export class WorkflowEngine {
         lines.push("");
         lines.push("```json");
         lines.push(JSON.stringify({
+          async: false,
           agent: task.agent,
           task: this.resolveTemplate(task.task),
           ...(task.skill ? { skill: task.skill } : {}),
@@ -671,36 +741,6 @@ const DEFAULT_CONTEXT_BUDGET: WorkflowContextBudget = {
 };
 
 
-function extractResultText(result: unknown): string {
-  if (typeof result === "string") return result;
-  if (result && typeof result === "object") {
-    // The subagent tool result structure varies; extract text content
-    const r = result as Record<string, unknown>;
-    if (typeof r.text === "string") return r.text;
-    if (typeof r.content === "string") return r.content;
-    if (Array.isArray(r.content)) {
-      return r.content
-        .filter((c: unknown) => c && typeof c === "object" && (c as Record<string, unknown>).type === "text")
-        .map((c: unknown) => (c as Record<string, string>).text)
-        .join("\n");
-    }
-    // Fallback: stringify
-    try {
-      return JSON.stringify(result, null, 2);
-    } catch {
-      return String(result);
-    }
-  }
-  return String(result ?? "");
-}
-
-function extractAgentName(result: unknown): string | null {
-  if (result && typeof result === "object") {
-    const r = result as Record<string, unknown>;
-    if (typeof r.agent === "string") return r.agent;
-  }
-  return null;
-}
 function normalizeSummary(summary: string | OutputSummary | undefined): OutputSummary {
   if (typeof summary === "string") return { summary };
   return summary ?? {};
@@ -760,8 +800,12 @@ function extractArtifactPath(result: unknown): string | null {
 
   if (result && typeof result === "object") {
     const r = result as Record<string, unknown>;
-    for (const key of ["artifactPath", "outputPath", "path"]) {
+    for (const key of ["artifactPath", "savedOutputPath", "outputPath", "path"]) {
       if (typeof r[key] === "string") return r[key];
+    }
+    if (r.artifactPaths && typeof r.artifactPaths === "object") {
+      const outputPath = (r.artifactPaths as Record<string, unknown>).outputPath;
+      if (typeof outputPath === "string") return outputPath;
     }
     if (typeof r.text === "string") return extractArtifactPath(r.text);
     if (typeof r.content === "string") return extractArtifactPath(r.content);

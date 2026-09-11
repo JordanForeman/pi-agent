@@ -1,5 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { InterceptorExtensionCore } from "../extension-core/interceptor-extension-core";
+import { allowGenericOrchestrationReminders } from "./runtime-reminder-policy.mjs";
 
 const COMPLEX_PROMPT_KEYWORDS = [
   "implement",
@@ -132,7 +133,9 @@ function registerRuntimeReminders(pi: ExtensionAPI) {
       pendingEditDriftReminder = false;
     }
 
-    if (shouldDefaultToDelegation(event.prompt) && turnCount - lastDelegationReminderTurn >= 1) {
+    const allowGenericReminders = allowGenericOrchestrationReminders(event.prompt);
+
+    if (allowGenericReminders && shouldDefaultToDelegation(event.prompt) && turnCount - lastDelegationReminderTurn >= 1) {
       reminders.push(
         "Standard operating procedure: start with a brief plan, then execute via `subagent` using the smallest viable mode (single, chain, or parallel)."
       );
@@ -142,13 +145,13 @@ function registerRuntimeReminders(pi: ExtensionAPI) {
       lastDelegationReminderTurn = turnCount;
     }
 
-    if (requestsParallelExecution(event.prompt)) {
+    if (allowGenericReminders && requestsParallelExecution(event.prompt)) {
       reminders.push(
         "Parallel intent detected. Prefer `/parallel` (or a chain with parallel steps), and split tasks so file ownership is conflict-safe."
       );
     }
 
-    if (hasDesignIntent(event.prompt)) {
+    if (allowGenericReminders && hasDesignIntent(event.prompt)) {
       reminders.push(
         "Design intent detected. Include a dedicated design-focused agent when useful and carry its output into implementation steps."
       );

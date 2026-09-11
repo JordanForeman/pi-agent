@@ -2,9 +2,9 @@ import fs from "node:fs";
 import path from "node:path";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { WorkflowExtensionCore } from "../extension-core/workflow-extension-core";
+import { extractRalphSignal, summarizeRalphOutput } from "./ralph-output-summary.mjs";
 import {
   WorkflowEngine,
-  type OutputSummary,
   type PhaseResult,
   type WorkflowContext,
   type WorkflowDefinition,
@@ -249,73 +249,12 @@ function registerRalphCommand(
 
 type RalphSignal = "RALPH_GROOMED" | "RALPH_WORKER_DONE" | "RALPH_COMPLETE" | "RALPH_BLOCKED" | "RALPH_SUMMARY_READY";
 
-const RALPH_SIGNALS: RalphSignal[] = [
-  "RALPH_GROOMED",
-  "RALPH_WORKER_DONE",
-  "RALPH_COMPLETE",
-  "RALPH_BLOCKED",
-  "RALPH_SUMMARY_READY",
-];
-
-function extractRalphSignal(text: string): RalphSignal | null {
-  const lineSignal = text.match(/(?:^|\n)\s*(RALPH_GROOMED|RALPH_WORKER_DONE|RALPH_COMPLETE|RALPH_BLOCKED|RALPH_SUMMARY_READY)\s*(?:\n|$)/);
-  if (lineSignal) return lineSignal[1] as RalphSignal;
-
-  for (const signal of ["RALPH_BLOCKED", "RALPH_COMPLETE", "RALPH_WORKER_DONE", "RALPH_GROOMED", "RALPH_SUMMARY_READY"] as RalphSignal[]) {
-    if (text.includes(signal)) return signal;
-  }
-  return null;
-}
-
-function extractSectionLine(text: string, label: string): string | null {
-  const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const match = text.match(new RegExp(`(?:^|\\n)\\s*${escaped}:\\s*(.+)`));
-  return match?.[1]?.trim() ?? null;
-}
-
-function compactRalphSummary(output: string): string {
-  const signal = extractRalphSignal(output);
-  const fields = [
-    "Increment",
-    "Changed files",
-    "Validation",
-    "Artifacts",
-    "Next priority",
-    "Blocker/decision needed",
-  ];
-  const lines = [signal, ...fields.map((field) => {
-    const value = extractSectionLine(output, field);
-    return value ? `${field}: ${value}` : null;
-  })].filter(Boolean) as string[];
-
-  if (lines.length > 0) return lines.join("\n");
-  return output.trim().split("\n").filter(Boolean).slice(0, 12).join("\n");
-}
-
-function summarizeRalphOutput({ output }: { output: string }): OutputSummary {
-  const verdict = extractRalphSignal(output) ?? undefined;
-  const artifactPath = output.match(/(?:Artifacts?|Output saved to):\s*(.+?)(?:\s*\(|\n|$)/i)?.[1]?.trim();
-  const topFindings = [
-    extractSectionLine(output, "Increment"),
-    extractSectionLine(output, "Validation"),
-    extractSectionLine(output, "Next priority"),
-    extractSectionLine(output, "Blocker/decision needed"),
-  ].filter(Boolean) as string[];
-
-  return {
-    verdict,
-    summary: compactRalphSummary(output),
-    topFindings,
-    artifactPath,
-  };
-}
-
 function firstReceiptSignal(result: PhaseResult): RalphSignal | null {
   for (const output of result.outputs) {
     const receiptSignal = output.receipt.verdict && extractRalphSignal(output.receipt.verdict);
-    if (receiptSignal) return receiptSignal;
+    if (receiptSignal) return receiptSignal as RalphSignal;
     const resultSignal = extractRalphSignal(output.result);
-    if (resultSignal) return resultSignal;
+    if (resultSignal) return resultSignal as RalphSignal;
   }
   return null;
 }
@@ -371,6 +310,7 @@ function createRalphWorkflow(opts: { cwd: string; runId: string; objective: stri
         contextMode: "file-only",
         tasks: [{
           agent: "ralph-groomer",
+          requires: ["filesystem-write", "shell"],
           task: [
             `Ralph run: ${opts.runId}`,
             "Objective: {input}",
@@ -397,6 +337,7 @@ function createRalphWorkflow(opts: { cwd: string; runId: string; objective: stri
         contextMode: "file-only",
         tasks: (context) => [{
           agent: "ralph-worker",
+          requires: ["filesystem-write", "shell"],
           task: [
             `Ralph run: ${opts.runId}`,
             `Worker increment: ${((context.state.workersRun as number | undefined) ?? 0) + 1}/${opts.iterations}`,
@@ -439,6 +380,7 @@ function createRalphWorkflow(opts: { cwd: string; runId: string; objective: stri
         contextMode: "file-only",
         tasks: [{
           agent: "ralph-summarizer",
+          requires: ["filesystem-write", "shell"],
           task: [
             `Finalize Ralph run ${opts.runId}.`,
             "Objective: {input}",

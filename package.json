@@ -24,6 +24,7 @@
   ],
   "scripts": {
     "postinstall": "node scripts/bootstrap-subagents.mjs",
+    "test": "node --experimental-transform-types --test agent/scripts/test/*.test.mjs",
     "validate": "node agent/scripts/validate-taxonomy.mjs"
   },
   "dependencies": {

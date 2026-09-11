@@ -1,0 +1,8 @@
+{
+  "prompts": [
+    "../agent/prompts/guides",
+    "../agent/prompts/conventions",
+    "../agent/prompts/formats",
+    "../agent/prompts/standards"
+  ]
+}

@@ -43,6 +43,42 @@ agent/
 └── keybindings.json
 ```
 
+## Capability layers and discovery
+
+The repository keeps four concerns separate:
+
+- **Guidance** lives in `agent/skills/` and supplies contextual engineering judgment.
+- **Invocation** lives in thin `agent/prompts/` templates.
+- **Execution** lives in `agent/subagents/` and lifecycle-managed workflow extensions.
+- **Evidence** uses the explicit `evidence-report` format to distinguish direct observations from gaps.
+
+User-facing prompts are grouped by intent:
+
+- Analyze: `/research`, `/arch`, `/why`, `/blast-radius`, `/skill-eval`, and `/review`
+- Plan: `/plan` and `/triage`
+- Ship: `/quick-commit`, `/quick-pr`, and `/verify`
+- Learn: `/learn`
+
+The added guides are also explicitly invocable as `/skill:design-rationale`, `/skill:blast-radius`, and `/skill:skill-evaluation`; use `/skill:evidence-report` when composing a custom evidence-bearing task. Prompt templates that depend on these guides pass a complete explicit skill array to their child role.
+
+Interaction modes are explicit, non-sticky operating envelopes: `/skill:research-mode`, `/skill:build-mode`, `/skill:verify-mode`, `/skill:review-mode`, and `/skill:ship-mode`. Invoking one authorizes routine actions inside that objective's documented boundary without repeated confirmation. The scope ends with the objective; modes do not bypass runtime guards, OS permissions, credentials, protected/shared branch rules, or ownership checks.
+
+Executable workflows are `/build`, `/research`, `/verify`, `/tdd`, `/triage`, and `/review`; each has a corresponding `:status` command. The research and verification workflows use `scratch_workspace` for disposable clones and fixtures. That tool creates roots directly under the OS temp directory, tracks exact session ownership, and removes only roots it created. Pi gives extension commands precedence over same-named prompt templates, so executable commands win prompt-name collisions while their extensions are loaded. Physical prompt paths are canonicalized, so loading this package and the corrected dotfiles category paths does not register the same file twice.
+
+Workflow phases run in the foreground (`async: false`), enforced at tool dispatch even when `pi-subagents` uses `asyncByDefault`. Disable `forceTopLevelAsync` for workflows. Cancellation (including an aborted parent signal), interrupted/detached children, and unsupported background acknowledgements fail the workflow and release its ownership without advancing or automatically resuming. After a blocked dispatch, remaining execution/resume calls in the same agent run stay blocked; read-only list/status/doctor calls remain available. If a background run was started despite the foreground contract, inspect/stop it before explicitly restarting the workflow; the workflow engine does not manage background jobs.
+
+To inspect the live inventories:
+
+```bash
+find agent/skills -type f -name SKILL.md -print | sort
+find agent/prompts -mindepth 2 -maxdepth 2 -type f -name '*.md' -print | sort
+# Ordinary agents (exclude chains and the directory README)
+find agent/subagents -maxdepth 1 -type f -name '*.md' ! -name '*.chain.md' ! -name 'README.md' -print | sort
+# Chains are a separate inventory
+find agent/subagents -maxdepth 1 -type f -name '*.chain.md' -print | sort
+find agent/extensions/workflows -maxdepth 1 -type f -name '*.ts' -print | sort
+```
+
 ## Syncing & Runtime
 
 **pi-subagents** powers agent execution:
@@ -54,6 +90,10 @@ agent/
 **prompt-composer** is loaded as part of this package, and may also be installed separately in dotfiles-managed setups:
 - Bundled dependency source: `git+ssh://git@github.com/JordanForeman/pi-prompt-composer.git#1ccb7c4e2d9d491035bb456e9e99222d07f53d23`
 - It composes runtime guidance from the synced `agent/skills/**/SKILL.md` metadata.
+
+### Skill activation policy
+
+The four injection modes remain distinct: `always` applies universal guidance, `detect` uses local rules, `classify` is eligible for semantic selection, and `explicit` activates only when requested or directly injected. Automatic classify-only activation is disabled because the package default has no classifier and enabling one would send the current prompt plus classify-skill descriptions to an external model provider, adding latency and cost. Classify-only capabilities remain available through `/skill:<name>` and through explicit prompt/subagent skill arrays. This repository does not enable automatic classifier calls or patch `pi-prompt-composer`.
 
 ### Inheritance chain (work machine)
 
@@ -81,7 +121,9 @@ Edit inside this repo, then apply Home Manager for the target machine:
 
 ## Operational Workflows
 
-Use `/build <objective>` for normal feature work. It runs a bounded in-flight implementation loop:
+Choose the command that matches the interaction. The command selects a bounded operating envelope; Pi proceeds autonomously inside it and stops when the next action crosses its safety, ownership, product, or publication boundary.
+
+Use `/research <question>` for cited read-only investigation, `/verify <claim>` for project-contract plus real-surface evidence, and `/build <objective>` for normal feature work. It runs a bounded in-flight implementation loop:
 
 ```text
 planner → builder → parallel reviewers → synthesis → builder fix pass → re-review (max 3 fix rounds) → final summary
@@ -102,6 +144,10 @@ ralph-groomer → ralph-worker (up to N sequential increments) → ralph-summari
 ```
 
 Treat `/build` as the default operational paradigm for feature work. Use Ralph only when you explicitly want durable `.pi/ralph/` artifacts, a backlog/progress ledger, or multiple autonomous increments across a longer-running objective. The Ralph surface is a compatibility/long-running mode and should converge toward the same build vocabulary over time.
+
+The parent Pi session only schedules phases and receives compact receipts/signals. Worker internals stay inside `ralph-worker` and durable `.pi/ralph/` artifacts. Worker, validator, and summary handoffs include exact commands, exit status, direct observations or artifact pointers, evidence verdicts, and residual gaps.
+
+Exposed commands are `/ralph:start`, `/ralph:status`, `/ralph:stop`, `/ralph:report`, and `/ralph:unlock`. Start creates or updates required `.pi/ralph/` state automatically. `/ralph:unlock` clears a stale lock only when Ralph state confirms that no run is active; it will not unlock an active run.
 
 ## Troubleshooting
 

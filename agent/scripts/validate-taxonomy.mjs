@@ -3,6 +3,16 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { parseFrontmatter, extractBody } from "./lib/frontmatter.mjs";
+import {
+  capabilitiesForTools,
+  validateAgentContent,
+  validateClassifierDocumentation,
+  validatePromptContent,
+  validateSettingsPromptPaths,
+  validateSkillCategoryCounts,
+  validateWorkflowSource,
+  validateWorkflowTaskSpecs,
+} from "./lib/semantic-validation.mjs";
 
 const repoRoot = process.cwd();
 const agentRoot = await pathExists(path.join(repoRoot, "agent"))
@@ -164,6 +174,7 @@ async function validateSkillTaxonomy() {
   }
 
   const skillNames = new Set();
+  const categoryCounts = new Map(SKILL_CATEGORIES.map((category) => [category, 0]));
 
   for (const category of SKILL_CATEGORIES) {
     const categoryPath = path.join(skillsRoot, category);
@@ -179,6 +190,7 @@ async function validateSkillTaxonomy() {
         continue;
       }
 
+      categoryCounts.set(category, (categoryCounts.get(category) ?? 0) + 1);
       const content = await fs.readFile(skillMd, "utf8");
       const frontmatter = parseFrontmatter(content);
       const dirName = path.basename(skillDir);
@@ -236,6 +248,9 @@ async function validateSkillTaxonomy() {
       }
     }
   }
+
+  errors.push(...validateSkillCategoryCounts({ categories: SKILL_CATEGORIES, counts: categoryCounts }));
+  return skillNames;
 }
 
 async function discoverExtensionEntryPoints(rootDir) {
@@ -308,13 +323,14 @@ async function validateExtensionTaxonomy() {
   }
 }
 
-async function validateSubagentStructure() {
+async function validateSubagentStructure(skillNames) {
   if (!(await pathExists(subagentsRoot))) {
     errors.push(`Missing subagents directory: ${toPosix(subagentsRoot)}`);
-    return new Set();
+    return { agentNames: new Set(), agentCapabilities: new Map() };
   }
 
   const agentNames = new Set();
+  const agentCapabilities = new Map();
   const files = await listFiles(subagentsRoot);
   const agentFiles = files.filter((f) => f.endsWith(".md") && !f.endsWith(".chain.md"));
 
@@ -344,6 +360,11 @@ async function validateSubagentStructure() {
       errors.push(`Subagent missing frontmatter description: ${displayPath}`);
     }
 
+    if (frontmatter.name) {
+      agentCapabilities.set(frontmatter.name, capabilitiesForTools(frontmatter.tools));
+    }
+    errors.push(...validateAgentContent({ content, filePath: displayPath, skillNames }));
+
     // Body content check
     const body = extractBody(content);
     if (!body) {
@@ -361,48 +382,110 @@ async function validateSubagentStructure() {
     }
   }
 
-  return agentNames;
+  return { agentNames, agentCapabilities };
 }
 
-function parseInlineArray(value) {
-  if (!value || typeof value !== "string") return [];
-  const trimmed = value.trim();
-  if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
-    return trimmed.slice(1, -1).split(",").map((s) => s.trim()).filter(Boolean);
+async function discoverWorkflowContracts() {
+  const workflowDir = path.join(extensionsRoot, "workflows");
+  const files = (await listFiles(workflowDir)).filter((file) => file.endsWith(".ts"));
+  const ralphPath = path.join(extensionsRoot, "ralph-loop.ts");
+  if (await pathExists(ralphPath)) files.push(ralphPath);
+
+  const workflowIds = new Set();
+  const sources = [];
+  for (const file of files.sort()) {
+    const source = await fs.readFile(file, "utf8");
+    sources.push({ file, source });
+    const definitionMatch = source.match(/(?:WorkflowDefinition\s*=|return)\s*\{[\s\S]*?\bid:\s*["']([^"']+)["']/);
+    if (definitionMatch) workflowIds.add(definitionMatch[1]);
   }
-  return trimmed.split(",").map((s) => s.trim()).filter(Boolean);
+
+  const specPaths = [
+    path.join(extensionCoreRoot, "review.workflow.json"),
+    path.join(workflowDir, "build.workflow.json"),
+  ];
+  const specs = [];
+  for (const file of specPaths) {
+    if (!(await pathExists(file))) continue;
+    const value = JSON.parse(await fs.readFile(file, "utf8"));
+    specs.push({ file, tasks: collectWorkflowSpecTasks(value) });
+  }
+
+  return { workflowIds, sources, specs };
 }
 
-async function validateCrossReferences(agentNames) {
-  // Validate prompt subagents: references point to real agents
+function collectWorkflowSpecTasks(value) {
+  if (Array.isArray(value)) return value.flatMap(collectWorkflowSpecTasks);
+  if (!value || typeof value !== "object") return [];
+
+  const tasks = Array.isArray(value.tasks) ? value.tasks : [];
+  return [
+    ...tasks,
+    ...Object.entries(value)
+      .filter(([key]) => key !== "tasks")
+      .flatMap(([, nested]) => collectWorkflowSpecTasks(nested)),
+  ];
+}
+
+async function validateSemanticContracts(skillNames, agentNames, agentCapabilities) {
+  const { workflowIds, sources, specs } = await discoverWorkflowContracts();
+
+  for (const { file, source } of sources) {
+    if (path.basename(file) === "build.ts") continue;
+    errors.push(...validateWorkflowSource({
+      source,
+      filePath: toPosix(file),
+      agentCapabilities,
+      knownAgents: agentNames,
+      skillNames,
+    }));
+  }
+
+  for (const { file, tasks } of specs) {
+    errors.push(...validateWorkflowTaskSpecs({
+      tasks,
+      filePath: toPosix(file),
+      agentCapabilities,
+      knownAgents: agentNames,
+      skillNames,
+    }));
+  }
+
+  const promptFiles = [];
   for (const category of PROMPT_CATEGORIES) {
     const categoryPath = path.join(promptsRoot, category);
     if (!(await pathExists(categoryPath))) continue;
-
-    const files = (await listFiles(categoryPath)).filter((f) => f.endsWith(".md"));
-    for (const file of files) {
+    for (const file of (await listFiles(categoryPath)).filter((item) => item.endsWith(".md"))) {
+      promptFiles.push(`${category}/${path.basename(file)}`);
       const content = await fs.readFile(file, "utf8");
-      const frontmatter = parseFrontmatter(content);
-      if (!frontmatter) continue;
-
-      const displayPath = toPosix(file);
-      const declaredAgents = parseInlineArray(frontmatter.subagents);
-
-      for (const agentRef of declaredAgents) {
-        if (!agentNames.has(agentRef)) {
-          errors.push(`Prompt references unknown subagent "${agentRef}": ${displayPath}`);
-        }
-      }
+      errors.push(...validatePromptContent({
+        content,
+        filePath: toPosix(file),
+        agentNames,
+        workflowIds,
+        skillNames,
+      }));
     }
   }
+
+  const settingsPath = path.join(agentRoot, "settings.json");
+  const settings = JSON.parse(await fs.readFile(settingsPath, "utf8"));
+  errors.push(...validateSettingsPromptPaths({
+    promptPaths: settings.prompts,
+    categories: PROMPT_CATEGORIES,
+    promptFiles,
+  }));
+
+  const readme = await fs.readFile(path.join(repoRoot, "README.md"), "utf8");
+  errors.push(...validateClassifierDocumentation({ readme, settings }));
 }
 
 async function main() {
   await validateNoLegacyDirectories();
   await validatePromptTaxonomy();
-  await validateSkillTaxonomy();
-  const agentNames = await validateSubagentStructure();
-  await validateCrossReferences(agentNames);
+  const skillNames = await validateSkillTaxonomy();
+  const { agentNames, agentCapabilities } = await validateSubagentStructure(skillNames);
+  await validateSemanticContracts(skillNames, agentNames, agentCapabilities);
   await validateExtensionTaxonomy();
 
   if (errors.length > 0) {

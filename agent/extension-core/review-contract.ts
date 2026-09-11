@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  type PhaseCapability,
   type PhaseContextMode,
   type PhaseDefinition,
   type PhaseExecution,
@@ -11,6 +12,7 @@ import {
 
 type ReviewTaskSpec = {
   agent: string;
+  requires: PhaseCapability[];
   skill?: string[];
   lines: string[];
 };
@@ -57,6 +59,7 @@ function materializePhase(spec: ReviewPhaseSpec, replacements: TemplateReplaceme
     contextMode: spec.contextMode,
     tasks: spec.tasks.map((task) => ({
       agent: task.agent,
+      requires: task.requires,
       task: materializeLines(task.lines, replacements),
       ...(task.skill ? { skill: task.skill } : {}),
     })),
@@ -139,9 +142,20 @@ function validateTaskSpec(value: unknown, phaseLabel: string, taskIndex: number)
 
   return {
     agent: asString(task.agent, `${phaseLabel}.tasks[${taskIndex}].agent`),
+    requires: asCapabilities(task.requires, `${phaseLabel}.tasks[${taskIndex}].requires`),
     skill,
     lines,
   };
+}
+
+function asCapabilities(value: unknown, label: string): PhaseCapability[] {
+  return asArray(value, label).map((item, index) => {
+    const capability = asString(item, `${label}[${index}]`);
+    if (capability !== "filesystem-write" && capability !== "shell") {
+      throw new Error(`review.workflow.json: ${label}[${index}] is invalid`);
+    }
+    return capability;
+  });
 }
 
 function asRecord(value: unknown, label: string): Record<string, unknown> {

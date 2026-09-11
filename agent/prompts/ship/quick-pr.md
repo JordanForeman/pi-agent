@@ -1,22 +1,14 @@
 ---
-description: Prepare changes and open/update a pull request safely
+description: Prepare changes and open or update a pull request safely
 subagents: [git-ops]
 ---
-Prepare and publish the current work as a pull request.
+Publish the current work as a pull request. This explicit `/quick-pr` invocation authorizes a scoped commit when needed, a normal push of the current topic branch, and creation or update of its current pull request without a second confirmation.
 
 Workflow:
-1. Inspect branch/diff scope versus default branch and summarize what will ship.
-2. Confirm branch/worktree safety (avoid main worktree for feature work).
-3. Run or suggest relevant validation checks before publishing.
-4. Perform all git operations (staging, commit creation, push) through your git specialist path.
-5. Ask for confirmation before any network-visible action (push/PR create/edit).
-6. Create or update the PR with:
-   - short title
-   - concise summary bullets
-   - test/verification checklist
-7. Return PR URL and a short summary of what was published.
+1. Inspect branch, worktree, attribution, and diff scope versus the default branch.
+2. Separate current-objective files from unrelated or unexpected state and run relevant validation.
+3. Perform scoped staging, commit creation when needed, and a normal topic-branch push through the git specialist path.
+4. Create or update the current pull request with a concise title, summary, and verification evidence.
+5. Return the pull-request URL and what was published.
 
-Constraints:
-- Keep commit/PR scope tight and intentional.
-- Do not force push unless explicitly requested.
-- Do not include secrets or unrelated files.
+Do not force push, rewrite history, write to a protected or shared branch, merge, deploy, release, expose secrets, send messages beyond the pull request, make destructive changes to pre-existing state, or include unrelated files. Stop when ownership or scope is ambiguous. This authorization expires after the requested pull-request update.

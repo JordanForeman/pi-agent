@@ -8,7 +8,8 @@
     "tasks": [
       {
         "agent": "design-reviewer",
-        "skill": ["api-design", "code-shape", "module-structure", "naming", "coupling", "comments"],
+        "requires": ["shell"],
+        "skill": ["api-design", "code-shape", "module-structure", "naming", "coupling", "comments", "review-mode"],
         "lines": [
           "Review the current changes for architecture and design quality.",
           "If this review angle is not applicable to the current diff, say so briefly.",
@@ -23,7 +24,8 @@
       },
       {
         "agent": "rails-reviewer",
-        "skill": ["ruby", "api-design", "code-shape", "naming", "coupling", "testing"],
+        "requires": ["shell"],
+        "skill": ["ruby", "api-design", "code-shape", "naming", "coupling", "testing", "review-mode"],
         "lines": [
           "Review the current changes for Ruby/Rails conventions and quality.",
           "If this review angle is not applicable to the current diff, say so briefly.",
@@ -38,7 +40,8 @@
       },
       {
         "agent": "frontend-reviewer",
-        "skill": ["typescript", "frontend-aesthetics", "make-interfaces-feel-better", "api-design", "code-shape", "testing"],
+        "requires": ["shell"],
+        "skill": ["typescript", "frontend-aesthetics", "make-interfaces-feel-better", "api-design", "code-shape", "testing", "review-mode"],
         "lines": [
           "Review the current changes for frontend/React/TypeScript quality.",
           "If this review angle is not applicable to the current diff, say so briefly.",
@@ -53,7 +56,8 @@
       },
       {
         "agent": "testing-reviewer",
-        "skill": ["testing", "test-first", "validation-discovery"],
+        "requires": ["shell"],
+        "skill": ["testing", "test-first", "validation-discovery", "review-mode"],
         "lines": [
           "Review the current changes for test quality, coverage, and validation against the stated acceptance criteria.",
           "If this review angle is not applicable to the current diff, say so briefly.",
@@ -68,7 +72,8 @@
       },
       {
         "agent": "reviewer",
-        "skill": ["code-security", "code-shape", "naming", "comments", "coupling", "error-signaling"],
+        "requires": ["shell"],
+        "skill": ["code-security", "code-shape", "naming", "comments", "coupling", "error-signaling", "review-mode"],
         "lines": [
           "Review the current changes for correctness, regressions, safety, and security.",
           "Do not edit files or run mutating commands.",
@@ -91,7 +96,8 @@
     "tasks": [
       {
         "agent": "reviewer",
-        "skill": ["concise-output"],
+        "requires": [],
+        "skill": ["concise-output", "review-mode"],
         "lines": [
           "Synthesize all review findings into a single actionable review report.",
           "Do not edit files.",

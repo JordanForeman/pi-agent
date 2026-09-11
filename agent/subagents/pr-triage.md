@@ -40,6 +40,7 @@ Use file extensions and paths to identify:
 **Testing:**
 - Test files (`spec/`, `test/`, `__tests__/`, `.test.`, `.spec.`) → Testing review needed
 - Testing configuration (`jest.config`, `rspec`, etc.) → Testing review needed
+- Changed production behavior (logic, APIs, error handling, persistence, or user-visible outcomes) → Testing review needed even when no test files changed
 
 **Architecture/Design:**
 - New directories or major reorganization → Design review needed
@@ -107,7 +108,7 @@ Produce a structured summary in this format:
 - **design-reviewer**: [Reason - e.g., "New abstractions introduced in X module"]
 - **rails-reviewer**: [Reason - e.g., "Ruby code changes in Y files"]
 - **frontend-reviewer**: [Reason - e.g., "React components modified"]
-- **testing-reviewer**: [Reason - e.g., "New test coverage for Z feature"]
+- **testing-reviewer**: [Reason - e.g., "Production behavior in Z changed and needs coverage review"]
 
 ### ⏭️ NOT APPLICABLE
 - **rails-reviewer**: [Reason - e.g., "No Ruby changes"]
@@ -142,7 +143,7 @@ Before producing your output:
 **Conservative Approach:**
 - When uncertain, recommend the reviewer (false positive is better than false negative)
 - If a change MIGHT have design implications, flag it for design review
-- If tests are modified, always recommend testing review
+- If tests are modified or production behavior changes, always recommend testing review; the reviewer will self-filter from the triage evidence
 
 **Clear Justification:**
 - Every "APPLICABLE" recommendation must have a specific reason

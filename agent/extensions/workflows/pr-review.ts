@@ -14,6 +14,7 @@ const PR_REVIEW_WORKFLOW: WorkflowDefinition = {
       execution: "sequential",
       tasks: [{
         agent: "pr-triage",
+        requires: ["shell"],
         task: [
           "Analyze the current changes and determine which review dimensions apply.",
           "",
