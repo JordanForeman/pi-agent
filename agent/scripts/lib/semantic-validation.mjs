@@ -68,23 +68,63 @@ export function validateSettingsPromptPaths({ promptPaths, categories, promptFil
   return diagnostics;
 }
 
+// This is a bounded canonical-source validator, not a TypeScript parser.
+// Consume strings before comments so markers in task/capability text stay text.
+const quotedSource = String.raw`(?:"(?:\\[^\r\n]|[^"\\\r\n])*"|'(?:\\[^\r\n]|[^'\\\r\n])*')`;
+const sourceString = `${quotedSource}|\u0060(?:\\\\[\\s\\S]|[^\u0060\\\\])*\u0060`;
+function withoutSourceComments(source) {
+  return source.replace(new RegExp(`(${sourceString})|/\\*[\\s\\S]*?\\*/|//[^\\r\\n]*`, "g"),
+    (text, string) => string ?? text.replace(/[^\r\n]/g, " "));
+}
+const sourceLiteralArray = `\\[\\s*(?:${quotedSource}(?:\\s*,\\s*${quotedSource})*\\s*,?)?\\s*\\]`;
+function agentDeclarations(source) {
+  // The string alternative prevents finding agent metadata inside task text.
+  return [...source.matchAll(new RegExp(`\\bagent\\s*:\\s*(${quotedSource}|\\S)|${sourceString}`, "g"))]
+    .filter((match) => match[1] !== undefined);
+}
+function canonicalTaskSuffix(source) {
+  const taskString = `(?:${sourceString})`;
+  const taskArray = `\\[\\s*(?:${taskString}(?:\\s*,\\s*${taskString})*\\s*,?)?\\s*\\]`;
+  const text = `(?:${taskString}|${taskArray}\\s*\\.\\s*join\\s*\\(\\s*${quotedSource}\\s*\\))`;
+  const property = new RegExp(`^\\s*,\\s*(?:(task|label)\\s*:\\s*(${text})|(skill)\\s*:\\s*(${sourceLiteralArray}))`);
+  const seen = new Set();
+  let hasLateSkill = false;
+  while (!/^\s*,?\s*}/.test(source)) {
+    const match = source.match(property);
+    if (!match) return { valid: false, hasLateSkill };
+    const name = match[1] ?? match[3];
+    if (seen.has(name)) return { valid: false, hasLateSkill };
+    seen.add(name);
+    if (name === "skill") hasLateSkill = true;
+    source = source.slice(match[0].length);
+  }
+  return { valid: true, hasLateSkill };
+}
+
 export function extractWorkflowContracts(source, filePath = "workflow source") {
-  const matches = [...source.matchAll(/\bagent:\s*["']([^"']+)["']/g)];
+  source = withoutSourceComments(source);
+  const matches = agentDeclarations(source).filter((match) => /^["']/.test(match[1]));
   return matches.map((match, index) => {
     const start = (match.index ?? 0) + match[0].length;
     const end = matches[index + 1]?.index ?? source.length;
     const afterAgent = source.slice(start, end);
-    const requiresMatch = afterAgent.match(/^\s*,?\s*requires:\s*\[([^\]]*)\]/);
-    const requires = requiresMatch
-      ? [...requiresMatch[1].matchAll(/["']([^"']+)["']/g)].map((item) => item[1])
+    const requiresMatch = afterAgent.match(new RegExp(`^\\s*,?\\s*requires\\s*:\\s*\\[((?:${quotedSource}|[^\\]"'])*)\\]`));
+    // Validate the entire array, not just the quoted substrings inside expressions.
+    const literal = /(?:"[^"\\\r\n]*"|'[^'\\\r\n]*')/;
+    const literalArray = new RegExp(`^\\s*(?:${literal.source}(?:\\s*,\\s*${literal.source})*\\s*,?)?\\s*$`);
+    const validRequires = Boolean(requiresMatch && literalArray.test(requiresMatch[1])
+      && /^\s*(?:,|})/.test(afterAgent.slice(requiresMatch[0].length)));
+    const requires = validRequires
+      ? [...requiresMatch[1].matchAll(new RegExp(literal.source, "g"))].map((item) => item[0].slice(1, -1))
       : [];
     const afterRequires = requiresMatch ? afterAgent.slice(requiresMatch[0].length) : "";
-    const skillMatch = afterRequires.match(/^\s*,?\s*skill:\s*\[([^\]]*)\]/);
+    const skillMatch = afterRequires.match(new RegExp(`^\\s*,?\\s*skill\\s*:\\s*(${sourceLiteralArray})`));
     const skills = skillMatch
-      ? [...skillMatch[1].matchAll(/["']([^"']+)["']/g)].map((item) => item[1])
+      ? [...skillMatch[1].matchAll(new RegExp(quotedSource, "g"))].map((item) => item[0].slice(1, -1))
       : [];
-    const hasLateSkill = Boolean(requiresMatch && !skillMatch && /\bskill\s*:/.test(afterRequires));
-    return { agent: match[1], requires, skills, declaresRequires: Boolean(requiresMatch), hasLateSkill, filePath };
+    const suffix = canonicalTaskSuffix(skillMatch ? afterRequires.slice(skillMatch[0].length) : afterRequires);
+    const hasLateSkill = Boolean(requiresMatch && suffix.hasLateSkill);
+    return { agent: match[1].slice(1, -1), requires, skills, declaresRequires: Boolean(requiresMatch), invalidRequires: Boolean(requiresMatch && !validRequires), invalidTaskMetadata: Boolean(requiresMatch && !suffix.valid), hasLateSkill, filePath };
   });
 }
 
@@ -97,14 +137,20 @@ export function validateWorkflowSource({
   skillNames,
 }) {
   const diagnostics = [];
-  for (const match of source.matchAll(/\bagent:\s*(\S)/g)) {
-    if (match[1] !== '"' && match[1] !== "'") {
+  for (const match of agentDeclarations(withoutSourceComments(source))) {
+    if (!/^["']/.test(match[1])) {
       diagnostics.push(diagnostic(filePath, `Workflow task agent must be a static string literal near offset ${match.index}`));
     }
   }
 
   const tasks = extractWorkflowContracts(source, filePath);
   for (const task of tasks) {
+    if (task.invalidRequires) {
+      diagnostics.push(diagnostic(filePath, `Workflow task assigned to "${task.agent}" requires array must contain only static string literals`));
+    }
+    if (task.invalidTaskMetadata) {
+      diagnostics.push(diagnostic(filePath, `Workflow canonical source task must use literal task/label text or joined literal text arrays after requires/skill; metadata overrides and spreads are unsupported`));
+    }
     if (task.hasLateSkill) {
       diagnostics.push(diagnostic(filePath, `Workflow task assigned to "${task.agent}" must declare skill immediately after requires`));
     }

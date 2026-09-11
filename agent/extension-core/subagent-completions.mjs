@@ -3,7 +3,7 @@
  * @param {unknown} result
  * @param {boolean} isError
  * @param {number} [remainingTaskCount=1]
- * @returns {Array<{agent: string | null, rawOutput: string, status: "success" | "error", toolResult: unknown}>}
+ * @returns {Array<{agent: string | null, rawOutput: string, status: "success" | "error", toolResult: unknown, stopReason?: string}>}
  */
 export function normalizeSubagentCompletions(result, isError, remainingTaskCount = 1) {
   const resultObject = result && typeof result === "object" ? result : undefined;
@@ -14,7 +14,8 @@ export function normalizeSubagentCompletions(result, isError, remainingTaskCount
   if (details?.mode === "single" || details?.mode === "parallel") {
     if (Array.isArray(details.results)) {
       if (details.results.length === 0) {
-        // Successful empties are async acknowledgements; failed empties are terminal dispatch failures.
+        // Empty successes may be cancellation or background acknowledgement, never completed work.
+        // The foreground-only engine must stop rather than wait for async events.
         if (!envelopeError) return [];
         const count = details.mode === "single" ? 1 : normalizedCount(remainingTaskCount);
         return Array.from({ length: count }, () => completion(result, true));
@@ -25,7 +26,15 @@ export function normalizeSubagentCompletions(result, isError, remainingTaskCount
     if (details.mode === "parallel") return [];
   }
 
-  // Retain legacy text/envelope behavior for sequential callers and chain results.
+  if (details?.mode === "chain" && Array.isArray(details.results)) {
+    if (details.results.length === 0 && !envelopeError) return [];
+    const stopped = details.results.find((child) => child?.interrupted || child?.detached);
+    if (stopped) {
+      return [{ ...completion(result, true), status: "error", stopReason: completion(stopped, false).stopReason }];
+    }
+  }
+
+  // Retain legacy text/envelope behavior for sequential callers and completed chains.
   return [completion(result, envelopeError)];
 }
 
@@ -35,13 +44,16 @@ function normalizedCount(value) {
 
 function completion(result, fallbackError) {
   const entry = result && typeof result === "object" ? result : {};
-  const failed = entry.error || entry.isError === true
+  const stopReason = entry.interrupted ? "Subagent interrupted; explicit next action required."
+    : entry.detached ? "Subagent detached; explicit next action required." : undefined;
+  const failed = stopReason || entry.error || entry.isError === true
     || (typeof entry.exitCode === "number" ? entry.exitCode !== 0 : fallbackError);
   return {
     agent: typeof entry.agent === "string" ? entry.agent : null,
     rawOutput: extractResultText(result),
     status: failed ? "error" : "success",
     toolResult: result,
+    ...(stopReason ? { stopReason } : {}),
   };
 }
 

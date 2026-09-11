@@ -265,9 +265,23 @@ After the subagent completes, report the outcome. The workflow engine advances a
 
 The engine listens for `tool_execution_end` events from `subagent`. It normalizes
 `details.mode === "single"` into one child completion and `"parallel"` into one
-completion per `details.results` entry. Management results and successful empty
-structured result lists (such as async dispatch acknowledgements) do not consume
-phase work. Failed empty single/parallel dispatches synthesize error completions
+completion per `details.results` entry. Management results do not consume phase
+work. Phase calls explicitly set `async: false`; a `tool_call` guard blocks missing
+or true `async` values (including accidental reliance on `asyncByDefault`) and
+resume actions (even with `async: false`), failing the workflow and releasing ownership.
+A separate dispatch-stop latch rejects every remaining execution/resume call in that
+agent run: Pi still preflights siblings after a blocked call with `terminate: true`.
+Read-only list/status/doctor calls remain available. The latch resets at agent-run
+start/end and session start/shutdown; session boundaries also abort active ownership.
+Management calls are correlated by `toolCallId`, not just result mode (status returns
+`mode: "single", results: []`, including errors). IDs are consumed on completion and
+cleared at run/session boundaries. Successful empty
+result lists are not completed work: cancellation or unsupported background
+acknowledgements fail the workflow immediately, without transitions or an async
+wait. `forceTopLevelAsync` is incompatible: disable it before starting a workflow.
+If an acknowledgement nevertheless arrives, inspect/stop its background run before
+restarting; the engine does not cancel external jobs or consume async events.
+Failed empty single/parallel dispatches synthesize error completions
 for the remaining phase work so count-based completion cannot hang. Both the event
 error flag and nested result error flag are honored. Legacy unstructured results
 still count as one dispatch.
@@ -275,7 +289,23 @@ still count as one dispatch.
 Each completion is compacted against the next pending task, retaining the child's
 agent, final output, exit/error status, and artifact path in its receipt. Outputs
 are capped at the phase's expected task count; a batch-level error does not mark
-successful children as failed.
+successful children as failed. Interrupted or detached children are errors even
+with exit code zero. They immediately fail the phase and release workflow ownership,
+including partial/mixed batches, without invoking advance, conditional, or loop
+transitions. An aborted dispatch context signal is also terminal cancellation, even
+when the child only reports a nonzero exit without interruption flags; output count
+does not delay release. Ordinary noncancelled errors retain conditional/loop behavior.
+Recovery requires an explicit next action, never automatic resume.
+
+Static TypeScript task validation deliberately accepts a bounded canonical source
+form, not arbitrary TypeScript: literal `agent`, immediately followed by a literal
+`requires` string array, optional immediate `skill` array, then `task`/`label` text.
+Text may be quoted strings, backtick templates without nested backticks, or arrays
+of those joined with a quoted delimiter. Task text is consumed as text, not searched
+for metadata. Trailing spreads, duplicate metadata, computed keys, and other task
+expressions/properties are rejected rather than evaluated; use this canonical form
+or validated JSON task specs. Line/block comments are whitespace trivia outside
+strings, including inside `requires`; comments cannot make expressions literal.
 
 After the agent turn ends (`agent_end`), once all expected task outputs are present,
 the engine records the phase result, evaluates the transition rule and either:

@@ -65,6 +65,8 @@ Interaction modes are explicit, non-sticky operating envelopes: `/skill:research
 
 Executable workflows are `/build`, `/research`, `/verify`, `/tdd`, `/triage`, and `/review`; each has a corresponding `:status` command. The research and verification workflows use `scratch_workspace` for disposable clones and fixtures. That tool creates roots directly under the OS temp directory, tracks exact session ownership, and removes only roots it created. Pi gives extension commands precedence over same-named prompt templates, so executable commands win prompt-name collisions while their extensions are loaded. Physical prompt paths are canonicalized, so loading this package and the corrected dotfiles category paths does not register the same file twice.
 
+Workflow phases run in the foreground (`async: false`), enforced at tool dispatch even when `pi-subagents` uses `asyncByDefault`. Disable `forceTopLevelAsync` for workflows. Cancellation (including an aborted parent signal), interrupted/detached children, and unsupported background acknowledgements fail the workflow and release its ownership without advancing or automatically resuming. After a blocked dispatch, remaining execution/resume calls in the same agent run stay blocked; read-only list/status/doctor calls remain available. If a background run was started despite the foreground contract, inspect/stop it before explicitly restarting the workflow; the workflow engine does not manage background jobs.
+
 To inspect the live inventories:
 
 ```bash

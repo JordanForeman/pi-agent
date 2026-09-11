@@ -1,4 +1,5 @@
-import { lstat, mkdtemp, rm } from "node:fs/promises";
+import { constants } from "node:fs";
+import { lstat, mkdtemp, open, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -13,8 +14,16 @@ export class ScratchWorkspaceRegistry {
 
   async create() {
     const root = await mkdtemp(path.join(this.tempRoot, SCRATCH_PREFIX));
-    const stat = await lstat(root);
-    this.#owned.set(root, { dev: stat.dev, ino: stat.ino });
+    const handle = await open(root, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+    try {
+      const stat = await handle.stat();
+      if (!stat.isDirectory()) throw new Error("Scratch root is not a directory");
+      // Pin the original inode: dev/ino alone can be recycled after deletion.
+      this.#owned.set(root, { dev: stat.dev, ino: stat.ino, handle });
+    } catch (error) {
+      await handle.close();
+      throw error;
+    }
     return { path: root };
   }
 
@@ -44,11 +53,12 @@ export class ScratchWorkspaceRegistry {
       // This rejects deterministic replacement, but recursive path deletion cannot
       // eliminate a same-user replacement race after the identity check.
       await rm(target, { recursive: true, force: false });
-      return { path: target, removed: true };
     } catch (error) {
       this.#owned.set(target, identity);
       throw error;
     }
+    await identity.handle.close();
+    return { path: target, removed: true };
   }
 
   async cleanupAll() {
@@ -58,7 +68,10 @@ export class ScratchWorkspaceRegistry {
         await this.remove(target);
         removed.push(target);
       } catch {
-        // Never broaden shutdown cleanup beyond roots that still satisfy ownership checks.
+        // End ownership even when shutdown refuses deletion; never leak the pin.
+        const identity = this.#owned.get(target);
+        this.#owned.delete(target);
+        await identity?.handle.close();
       }
     }
     return removed;

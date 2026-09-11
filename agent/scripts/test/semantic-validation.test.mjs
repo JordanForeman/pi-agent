@@ -119,6 +119,109 @@ test("workflow validation rejects unknown agents and capability mismatches", asy
   }), []);
 });
 
+for (const entries of ["requiredCapability", "42", "...requirements", '"shell", requiredCapability', '"shell" + suffix', 'getCapability()', 'null', '{}', '["shell"]', '"shell",,', '`shell`']) {
+  test(`workflow requirements reject nonliteral array entries: ${entries}`, () => {
+    assert.match(messages(validateWorkflowSource({
+      source: `{ agent: "builder", requires: [${entries}], task: "Work" }`,
+      filePath: "malformed.ts",
+      agentCapabilities: new Map([["builder", new Set(["shell"])]]),
+      knownAgents: new Set(["builder"]),
+    })), /requires.*static string literal/);
+  });
+}
+
+test("workflow requirements accept empty and static literal arrays", () => {
+  for (const entries of ['', '"shell"', "'shell',", '"filesystem-write", \'shell\',']) {
+    assert.deepEqual(validateWorkflowSource({
+      source: `{ agent: "builder", requires: [${entries}], task: "Work" }`,
+      filePath: "valid.ts",
+      agentCapabilities: new Map([["builder", new Set(["shell", "filesystem-write"])]]),
+      knownAgents: new Set(["builder"]),
+    }), []);
+  }
+});
+
+function validateStaticTask(source, capabilities = ["shell"]) {
+  return validateWorkflowSource({ source, filePath: "canonical.ts", agentCapabilities: new Map([["builder", new Set(capabilities)]]), knownAgents: new Set(["builder"]) });
+}
+
+for (const trivia of [" ", " /* comment */ ", " // comment\n "]) {
+  test(`commented agent punctuation cannot hide invalid contracts: ${JSON.stringify(trivia)}`, () => {
+    const source = `{ agent${trivia}:${trivia}"missing", requires: [42], task: "Work", ...overrides }`;
+    const diagnostics = messages(validateStaticTask(source));
+    assert.match(diagnostics, /unknown workflow agent "missing"/);
+    assert.match(diagnostics, /requires.*static string literal/);
+    assert.match(diagnostics, /metadata override/);
+  });
+
+  test(`canonical properties accept punctuation trivia: ${JSON.stringify(trivia)}`, () => {
+    const text = 'agent /* hidden */: "fake", requires // hidden\\n: [42], ...overrides';
+    const source = `{ agent${trivia}:${trivia}"builder"${trivia},${trivia}requires${trivia}:${trivia}[${trivia}"shell"${trivia},${trivia}]${trivia},${trivia}skill${trivia}:${trivia}[${trivia}"known-skill"${trivia},${trivia}]${trivia},${trivia}task${trivia}:${trivia}${JSON.stringify(text)}${trivia},${trivia}label${trivia}:${trivia}"Work"${trivia},${trivia}}`;
+    assert.equal(extractWorkflowContracts(source).length, 1);
+    const options = { source, filePath: "commented.ts", agentCapabilities: new Map([["builder", new Set(["shell"])]]), knownAgents: new Set(["builder"]) };
+    assert.deepEqual(validateWorkflowSource({ ...options, skillNames: new Set(["known-skill"]) }), []);
+    assert.match(messages(validateWorkflowSource({ ...options, skillNames: new Set() })), /unknown skill "known-skill"/);
+  });
+}
+
+for (const entries of ["42", "...unknownSkills", '"known-skill", 42', '"known-skill" + suffix']) {
+  test(`immediate skill arrays reject nonliteral entries: ${entries}`, () => {
+    assert.match(messages(validateStaticTask(`{ agent: "builder", requires: [], skill: [${entries}], task: "Work" }`)), /canonical.*task|metadata override/);
+  });
+}
+
+test("immediate skill arrays accept only known static literals", () => {
+  for (const entries of ["", '"known-skill"', "'known-skill',", '/* trivia */ "known-skill", // trailing\n']) {
+    assert.deepEqual(validateWorkflowSource({
+      source: `{ agent: "builder", requires: [], skill: [${entries}], task: "Work" }`,
+      filePath: "valid-skills.ts",
+      agentCapabilities: new Map(),
+      knownAgents: new Set(["builder"]),
+      skillNames: new Set(["known-skill"]),
+    }), []);
+  }
+});
+
+for (const entries of ['"shell" /* rationale */', '// rationale\n "shell", // trailing\n', '/* ] agent: "fake" */ "shell"', '"shell" /* comma , */ ,']) {
+  test(`literal requirements allow comment trivia: ${entries}`, () => {
+    assert.deepEqual(validateStaticTask(`{ agent: "builder", requires: [${entries}], task: "Work" }`), []);
+  });
+}
+
+for (const entries of ['"shell" /* rationale */ + suffix', '/* rationale */ 42', '"shell", // rationale\n ...requirements', '"shell" /* gap */ "shell"', '"shell" // hidden close ]\n + suffix']) {
+  test(`comments cannot hide requirement expressions: ${entries}`, () => {
+    assert.match(messages(validateStaticTask(`{ agent: "builder", requires: [${entries}], task: "Work" }`)), /requires.*static string literal/);
+  });
+}
+
+test("comment markers inside capability strings are not trivia", () => {
+  for (const capability of ["shell/*rationale*/", "shell//rationale"]) {
+    const source = `{ agent: "builder", requires: ["${capability}"], task: "Work" }`;
+    assert.deepEqual(validateStaticTask(source, [capability]), []);
+    assert.match(messages(validateStaticTask(source)), /requires capability/);
+  }
+});
+
+for (const suffix of ['...{ requires: [42] }, task: "Work"', 'requires: [42], task: "Work"', 'task: "Work", ...overrides', 'task: "Work", "requires": [42]', 'task: "Work", ["requires"]: [42]', 'task: "Work", requires: []']) {
+  test(`canonical tasks reject metadata overrides: ${suffix}`, () => {
+    assert.match(messages(validateStaticTask(`{ agent: "builder", requires: [], ${suffix} }`)), /canonical.*task|metadata override/);
+  });
+}
+
+test("canonical task text retains existing interpolated templates and joined arrays", () => {
+  for (const task of ['`Ralph run: ${opts.runId}`', '[`Run: ${opts.runId}`, `Increment: ${((context.state.count as number) ?? 0) + 1}`, "Work"].join("\\n")']) {
+    assert.deepEqual(validateStaticTask(`{ agent: "builder", requires: [], task: ${task} }`), []);
+    assert.match(messages(validateStaticTask(`{ agent: "builder", requires: [], task: ${task}, ...overrides }`)), /metadata override/);
+  }
+});
+
+test("task text is not scanned as metadata override syntax", () => {
+  const text = 'agent: "fake", requires: [42], ...overrides, skill: ["fake"] // /* }';
+  for (const task of [JSON.stringify(text), `[${JSON.stringify(text)}, "Work"].join("\\n")`]) {
+    assert.deepEqual(validateStaticTask(`{ agent: "builder", requires: [], task: ${task} }`), []);
+  }
+});
+
 test("workflow validation rejects skill metadata placed after another task property", () => {
   const source = `{
     agent: "builder",

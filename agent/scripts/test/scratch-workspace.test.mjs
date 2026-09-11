@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { lstat, mkdtemp, mkdir, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { lstat, mkdtemp, mkdir, readdir, readlink, rename, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -8,7 +8,10 @@ import { ScratchWorkspaceRegistry } from "../../extensions/scratch-workspace-cor
 async function fixture(t) {
   const tempRoot = await mkdtemp(path.join(os.tmpdir(), "scratch-registry-test-"));
   const registry = new ScratchWorkspaceRegistry({ tempRoot });
-  t.after(async () => rm(tempRoot, { recursive: true, force: true }));
+  t.after(async () => {
+    await registry.cleanupAll();
+    await rm(tempRoot, { recursive: true, force: true });
+  });
   return { registry, tempRoot };
 }
 
@@ -63,6 +66,44 @@ test("rejects a replacement directory at the same pathname and preserves its con
   assert.equal((await lstat(created.path)).isDirectory(), true);
   assert.equal((await lstat(sentinel)).isFile(), true);
 });
+
+for (const cleanup of [false, true]) {
+  test(`direct delete/recreate preserves replacement (${cleanup ? "cleanupAll" : "remove"})`, async (t) => {
+    const { registry } = await fixture(t);
+    for (let attempt = 0; attempt < 32; attempt++) {
+      const created = await registry.create();
+      await rm(created.path, { recursive: true });
+      await mkdir(created.path);
+      const sentinel = path.join(created.path, "sentinel");
+      await writeFile(sentinel, "must survive");
+      if (cleanup) assert.deepEqual(await registry.cleanupAll(), []);
+      else await assert.rejects(registry.remove(created.path), /filesystem identity changed/);
+      assert.equal((await lstat(sentinel)).isFile(), true);
+    }
+  });
+}
+
+async function rootHandles(root) {
+  const targets = await Promise.all((await readdir("/proc/self/fd")).map((fd) =>
+    readlink(`/proc/self/fd/${fd}`).catch(() => "")));
+  return targets.filter((target) => target === root || target === `${root} (deleted)`);
+}
+
+for (const replaced of [false, true]) {
+  test(`ownership pins directory and cleanup closes handles (replaced=${replaced})`, { skip: process.platform !== "linux" }, async (t) => {
+    const { registry } = await fixture(t);
+    const created = await registry.create();
+    assert.equal((await rootHandles(created.path)).length, 1);
+    if (replaced) {
+      await rm(created.path, { recursive: true });
+      await mkdir(created.path);
+      await assert.rejects(registry.remove(created.path), /filesystem identity changed/);
+    }
+    await registry.cleanupAll();
+    assert.deepEqual(await rootHandles(created.path), []);
+    assert.deepEqual(await registry.cleanupAll(), []);
+  });
+}
 
 test("duplicate concurrent removal permits one owner and rejects the other", async (t) => {
   const { registry } = await fixture(t);
