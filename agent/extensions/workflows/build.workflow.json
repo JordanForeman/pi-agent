@@ -11,6 +11,7 @@
         "agent": "pr-triage",
         "requires": ["shell"],
         "skill": ["review-mode"],
+        "model": "openai-codex/gpt-6-astra",
         "lines": [
           "Inspect the current repository changes and core review for specialist applicability.",
           "Do not edit files or run mutating commands. Do not delegate to other subagents.",
@@ -39,6 +40,7 @@
           "agent": "planner",
           "requires": [],
           "skill": ["search-before-write", "validation-discovery", "build-mode"],
+          "model": "openai-codex/gpt-6-astra",
           "lines": [
             "Create a concise implementation plan for: {input}",
             "",
@@ -64,6 +66,7 @@
           "agent": "builder",
           "requires": ["filesystem-write", "shell"],
           "skill": ["search-before-write", "test-first", "validation-discovery", "avoid-over-engineering", "code-shape", "naming", "comments", "coupling", "error-signaling", "testing", "build-mode"],
+          "model": "openai-codex/gpt-5.6-sol",
           "lines": [
             "Implement the planned feature work for: {input}",
             "",
@@ -90,6 +93,7 @@
           "agent": "builder",
           "requires": ["filesystem-write", "shell"],
           "skill": ["search-before-write", "test-first", "validation-discovery", "avoid-over-engineering", "code-shape", "naming", "comments", "coupling", "error-signaling", "testing", "build-mode"],
+          "model": "openai-codex/gpt-5.6-sol",
           "lines": [
             "Apply only the accepted in-scope fixes from the synthesized review verdict.",
             "",
@@ -116,6 +120,7 @@
           "agent": "reviewer",
           "requires": [],
           "skill": ["concise-output"],
+          "model": "openai-codex/gpt-6-astra",
           "lines": [
             "Produce the final build summary for: {input}",
             "Do not edit files.",

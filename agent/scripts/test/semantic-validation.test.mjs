@@ -380,14 +380,15 @@ test("all live workflow tasks declare explicit capabilities", async () => {
     readFile(new URL("../../extensions/workflows/tdd.ts", import.meta.url), "utf8"),
     readFile(new URL("../../extensions/workflows/triage.ts", import.meta.url), "utf8"),
     readFile(new URL("../../extensions/workflows/pr-review.ts", import.meta.url), "utf8"),
+    readFile(new URL("../../extensions/workflows/plan.ts", import.meta.url), "utf8"),
     readFile(new URL("../../extensions/workflows/research.ts", import.meta.url), "utf8"),
     readFile(new URL("../../extensions/workflows/verify.ts", import.meta.url), "utf8"),
     readFile(new URL("../../extensions/ralph-loop.ts", import.meta.url), "utf8"),
   ]);
-  const [tddTasks, triageTasks, prReviewTasks, researchTasks, verifyTasks, ralphTasks] = sources.map((source) => extractWorkflowContracts(source));
+  const [tddTasks, triageTasks, prReviewTasks, planTasks, researchTasks, verifyTasks, ralphTasks] = sources.map((source) => extractWorkflowContracts(source));
 
-  assert.deepEqual([tddTasks.length, triageTasks.length, prReviewTasks.length, researchTasks.length, verifyTasks.length, ralphTasks.length], [3, 3, 1, 1, 1, 3]);
-  for (const task of [...tddTasks, ...triageTasks, ...prReviewTasks, ...researchTasks, ...verifyTasks, ...ralphTasks]) {
+  assert.deepEqual([tddTasks.length, triageTasks.length, prReviewTasks.length, planTasks.length, researchTasks.length, verifyTasks.length, ralphTasks.length], [3, 3, 1, 1, 1, 1, 3]);
+  for (const task of [...tddTasks, ...triageTasks, ...prReviewTasks, ...planTasks, ...researchTasks, ...verifyTasks, ...ralphTasks]) {
     assert.equal(task.declaresRequires, true, `${task.agent} must declare requires`);
   }
   assert.deepEqual(tddTasks.map(({ agent, requires }) => ({ agent, requires })), [

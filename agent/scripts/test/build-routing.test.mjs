@@ -9,6 +9,13 @@ import { WorkflowEngine } from "../../extension-core/workflow-engine.ts";
 
 const roles = ["design-reviewer", "rails-reviewer", "frontend-reviewer", "testing-reviewer"];
 const selection = (chosen = []) => JSON.stringify({ decisions: roles.map((agent) => ({ agent, applicable: chosen.includes(agent), reason: `Inspected src/service.ts and test/service.test.ts: ${agent} ${chosen.includes(agent) ? "applies" : "does not apply"}.` })) });
+const preparation = () => JSON.stringify({ status: "READY", repository: "example/repo", branch: "feat/test", base: "main" });
+const publication = (overrides = {}) => JSON.stringify({
+  status: "PUBLISHED", repository: "example/repo", branch: "feat/test",
+  commit: "a".repeat(40), remoteCommit: "a".repeat(40),
+  prUrl: "https://github.com/example/repo/pull/42", prState: "OPEN", scope: "OBJECTIVE_ONLY",
+  ...overrides,
+});
 
 async function loadFixture(t, mutate = () => {}, entry = "build") {
   const root = await mkdtemp(path.join(tmpdir(), "pi-build-routing-"));
@@ -27,11 +34,11 @@ async function loadFixture(t, mutate = () => {}, entry = "build") {
   finally { hook.deregister(); }
 }
 
-async function fixture(t, mutate) {
+async function fixture(t, mutate, commandName = "build") {
   const module = await loadFixture(t, mutate);
   const handlers = new Map(); const messages = []; const ctx = { hasUI: false };
   const pi = { on: (name, handler) => handlers.set(name, handler), sendUserMessage: (text) => messages.push(text) };
-  const engine = new WorkflowEngine(pi, module.createBuildWorkflow("build"));
+  const engine = new WorkflowEngine(pi, module.createBuildWorkflow(commandName));
   t.after(() => engine.abort());
   engine.start("Implement the service", ctx);
   return { engine, messages,
@@ -45,7 +52,7 @@ async function fixture(t, mutate) {
       this.emit("tool_execution_end", { toolCallId: "run", toolName: "subagent", isError: options.eventError ?? false, result: { isError: options.envelopeError ?? false, details: { mode: options.mode ?? (tasks.length > 1 ? "parallel" : "single"), results: children } } });
       this.emit("agent_end");
     },
-    toCore() { this.complete(); this.complete(); assert.equal(this.phase, "core-review"); },
+    toCore() { if (this.phase === "prepare") this.complete(preparation()); this.complete(); this.complete(); assert.equal(this.phase, "core-review"); },
     toSelection() { this.toCore(); this.complete(); assert.equal(this.phase, "select-reviewers"); },
     toSynthesis(chosen = []) { this.toSelection(); this.complete(selection(chosen)); if (chosen.length) this.complete(); assert.equal(this.phase, "synthesize"); },
     assertBlocked() { assert.equal(this.phase, "finalize"); assert.equal(this.context.state.finalVerdict, "BUILD_BLOCKED"); assert.equal(this.context.state.fixRounds, 0); },
@@ -134,6 +141,67 @@ test("exactly three fix rounds, then honest unresolved finalization", async (t) 
   h.complete("Verdict: BUILD_FIXES_NEEDED\nStill unresolved"); assert.equal(h.phase, "finalize");
   assert.equal(h.context.state.finalVerdict, "BUILD_FIXES_NEEDED"); assert.equal(h.context.state.fixRounds, 3);
 });
+test("vibe prepares a topic branch before planning", async (t) => {
+  const h = await fixture(t, undefined, "vibe");
+  assert.equal(h.phase, "prepare"); assert.equal(h.call.agent, "git-ops");
+  assert.equal(h.call.model, "openai-codex/gpt-5.6-sol");
+  assert.match(h.call.task, /create and switch.*topic branch/i);
+  h.complete(preparation()); assert.equal(h.phase, "plan");
+  assert.equal(h.context.state.repository, "example/repo"); assert.equal(h.context.state.branch, "feat/test");
+});
+for (const [name, output] of [
+  ["semantic refusal", JSON.stringify({ status: "BLOCKED", reason: "Unrelated dirty files" })],
+  ["duplicate status", `{"status":"BLOCKED","status":"READY","repository":"example/repo","branch":"feat/test","base":"main"}`],
+]) test(`vibe does not implement after ${name} during branch preparation`, async (t) => {
+  const h = await fixture(t, undefined, "vibe");
+  h.complete(output);
+  assert.equal(h.phase, "finalize"); assert.equal(h.context.state.finalVerdict, "BUILD_BLOCKED");
+  assert.match(h.context.state.blockedReason, /preparation/i);
+});
+test("vibe fixes beyond the build cap and publishes only after a clean review", async (t) => {
+  const h = await fixture(t, undefined, "vibe"); h.toSynthesis();
+  for (let round = 1; round <= 3; round++) {
+    h.complete("Verdict: BUILD_FIXES_NEEDED\nFix src/service.ts");
+    assert.equal(h.phase, "fix"); assert.equal(h.context.state.fixRounds, round);
+    h.complete(); h.complete(); h.complete(selection()); assert.equal(h.phase, "synthesize");
+  }
+  h.complete("Verdict: BUILD_FIXES_NEEDED\nOne more fix");
+  assert.equal(h.phase, "fix"); assert.equal(h.context.state.fixRounds, 4);
+  h.complete(); h.complete(); h.complete(selection());
+  h.complete("Verdict: BUILD_CLEAN\nReady to publish");
+  assert.equal(h.phase, "publish"); assert.equal(h.call.agent, "git-ops");
+  assert.equal(h.call.model, "openai-codex/gpt-5.6-sol");
+  assert.deepEqual(h.call.skill, ["git-attribution", "git-ops", "pr-descriptions", "ship-mode"]);
+  h.complete(publication());
+  assert.equal(h.phase, "finalize"); assert.equal(h.context.state.prUrl, "https://github.com/example/repo/pull/42");
+  assert.match(h.call.task, /pull\/42/);
+});
+test("vibe stops after ten unresolved fix rounds", async (t) => {
+  const h = await fixture(t, undefined, "vibe"); h.toSynthesis();
+  for (let round = 1; round <= 10; round++) {
+    h.complete("Verdict: BUILD_FIXES_NEEDED\nFix src/service.ts");
+    assert.equal(h.phase, "fix"); assert.equal(h.context.state.fixRounds, round);
+    h.complete(); h.complete(); h.complete(selection()); assert.equal(h.phase, "synthesize");
+  }
+  h.complete("Verdict: BUILD_FIXES_NEEDED\nStill unresolved");
+  assert.equal(h.phase, "finalize"); assert.equal(h.context.state.finalVerdict, "BUILD_FIXES_NEEDED");
+  assert.equal(h.context.state.fixRounds, 10);
+});
+for (const [name, output] of [
+  ["missing proof", "Push succeeded but no URL was reported"],
+  ["semantic failure", `${publication()}\nPush blocked`],
+  ["duplicate status", publication().replace('{"status":"PUBLISHED"', '{"status":"BLOCKED","status":"PUBLISHED"')],
+  ["wrong repository", publication({ repository: "other/repo" })],
+  ["wrong branch", publication({ branch: "feat/other" })],
+  ["unverified commit", publication({ remoteCommit: "b".repeat(40) })],
+  ["unscoped staging", publication({ scope: "UNRELATED_FILES" })],
+]) test(`vibe fails closed on ${name} publication output`, async (t) => {
+  const h = await fixture(t, undefined, "vibe"); h.toSynthesis();
+  h.complete("Verdict: BUILD_CLEAN"); assert.equal(h.phase, "publish");
+  h.complete(output);
+  assert.equal(h.phase, "finalize"); assert.equal(h.context.state.finalVerdict, "BUILD_BLOCKED");
+  assert.match(h.context.state.blockedReason, /publication/i);
+});
 test("specialists can be selected for the first time after a fix", async (t) => {
   const h = await fixture(t); h.toSynthesis(); h.complete("Verdict: BUILD_FIXES_NEEDED"); h.complete();
   h.complete(); h.complete(selection([roles[0], roles[3]])); assert.equal(h.phase, "specialist-review");
@@ -152,27 +220,38 @@ test("failed fix cannot restart review or claim clean", async (t) => {
 });
 for (const reviewModels of [undefined, { core: "test-provider/core", selector: "test-provider/selector" }, { core: "test-provider/core" }, { selector: "test-provider/selector" }]) test(`build-local model routing: ${JSON.stringify(reviewModels)}`, async (t) => {
   const h = await fixture(t, (spec) => { if (reviewModels) spec.reviewModels = reviewModels; });
-  h.toCore(); assert.equal(h.call.model, reviewModels?.core); assert.equal(Object.hasOwn(h.call, "model"), reviewModels?.core !== undefined);
-  h.complete(); assert.equal(h.call.model, reviewModels?.selector); assert.equal(Object.hasOwn(h.call, "model"), reviewModels?.selector !== undefined);
-  h.complete(selection([roles[0], roles[3]])); for (const task of h.call.tasks) assert.equal(Object.hasOwn(task, "model"), false);
+  h.toCore(); assert.equal(h.call.model, reviewModels?.core ?? "openai-codex/gpt-6-astra");
+  h.complete(); assert.equal(h.call.model, reviewModels?.selector ?? "openai-codex/gpt-6-astra");
+  h.complete(selection([roles[0], roles[3]])); for (const task of h.call.tasks) assert.equal(task.model, "openai-codex/gpt-6-astra");
 });
 for (const value of [null, [], { core: "" }, { selector: 42 }, { specialist: "test-provider/model" }]) test(`invalid build reviewModels rejected: ${JSON.stringify(value)}`, async (t) => {
   await assert.rejects(loadFixture(t, (spec) => { spec.reviewModels = value; }), /reviewModels/);
 });
+test("build extension registers the autonomous vibe command", async (t) => {
+  const module = await loadFixture(t);
+  const commands = new Map(); const handlers = new Map();
+  module.default({ registerCommand: (name, command) => commands.set(name, command), on: (name, handler) => handlers.set(name, handler), sendUserMessage() {} });
+  t.after(() => handlers.get("session_shutdown")?.({}, { hasUI: false }));
+  assert.ok(commands.has("build")); assert.ok(commands.has("vibe")); assert.ok(commands.has("vibe:status"));
+});
+
 test("standalone review retains fixed five reviewers and foreground dispatch", async (t) => {
   const module = await loadFixture(t, (spec) => { spec.reviewModels = { core: "test-provider/core", selector: "test-provider/selector" }; }, "pr-review");
   const commands = new Map(); const handlers = new Map(); const messages = []; const ctx = { hasUI: false };
   module.default({ registerCommand: (name, command) => commands.set(name, command), on: (name, handler) => handlers.set(name, handler), sendUserMessage: (text) => messages.push(text) });
   t.after(() => handlers.get("session_shutdown")?.({}, ctx)); await commands.get("review").handler("Review", ctx);
+  const triage = JSON.parse(messages.at(-1).match(/```json\n([\s\S]*?)\n```/)[1]);
+  assert.equal(triage.model, "openai-codex/gpt-6-astra");
   handlers.get("tool_execution_end")({ toolName: "subagent", result: { details: { mode: "single", results: [{ agent: "pr-triage", exitCode: 0, finalOutput: "No specialists apply" }] } }, isError: false }, ctx);
   handlers.get("agent_end")({}, ctx);
   const call = JSON.parse(messages.at(-1).match(/```json\n([\s\S]*?)\n```/)[1]); assert.equal(call.async, false);
   assert.deepEqual(call.tasks.map((task) => task.agent), [...roles, "reviewer"]);
-  for (const task of call.tasks) assert.equal(Object.hasOwn(task, "model"), false);
+  for (const task of call.tasks) assert.equal(task.model, "openai-codex/gpt-6-astra");
   handlers.get("tool_execution_end")({ toolName: "subagent", result: { details: { mode: "parallel", results: call.tasks.map((task) => ({ agent: task.agent, exitCode: 0, finalOutput: `Finding from ${task.agent}` })) } }, isError: false }, ctx);
   handlers.get("agent_end")({}, ctx);
   const synthesis = JSON.parse(messages.at(-1).match(/```json\n([\s\S]*?)\n```/)[1]);
   assert.equal(synthesis.agent, "reviewer"); assert.equal(synthesis.async, false);
+  assert.equal(synthesis.model, "openai-codex/gpt-6-astra");
   for (const task of call.tasks) assert.ok(synthesis.task.includes(`Finding from ${task.agent}`));
   const count = messages.length;
   handlers.get("tool_execution_end")({ toolName: "subagent", result: { content: [{ type: "text", text: "Review complete" }] }, isError: false }, ctx);
