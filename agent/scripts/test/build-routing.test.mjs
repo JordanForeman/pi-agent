@@ -146,6 +146,7 @@ test("vibe prepares a topic branch before planning", async (t) => {
   assert.equal(h.phase, "prepare"); assert.equal(h.call.agent, "git-ops");
   assert.equal(h.call.model, "openai-codex/gpt-5.6-sol");
   assert.match(h.call.task, /create and switch.*topic branch/i);
+  assert.match(h.call.task, /^Do not edit files\.$/m);
   h.complete(preparation()); assert.equal(h.phase, "plan");
   assert.equal(h.context.state.repository, "example/repo"); assert.equal(h.context.state.branch, "feat/test");
 });
