@@ -6,7 +6,7 @@ Multi-phase, lifecycle-managed orchestration built on the shared `WorkflowEngine
 
 | File | Commands | Pattern | Phases |
 |---|---|---|---|
-| `build.ts` + `build.workflow.json` + `extension-core/review.workflow.json` | `/build`, `/build:status`, `/vibe`, `/vibe:status` | One-writer implementation loops | prepare topic branch (`vibe`) → plan → implement → shared review → fix/re-review → publish PR (`vibe`) → summarize |
+| `build.ts` + `build.workflow.json` + `extension-core/review.workflow.json` | `/build`, `/build:status`, `/founder-mode`, `/founder-mode:status` | One-writer implementation loops | prepare topic branch (`founder-mode`) → plan → implement → shared review → fix/re-review → publish PR (`founder-mode`) → summarize |
 | `plan.ts` | `/plan` | Focused read-only planning with Codex Astra | inspect → plan |
 | `pr-review.ts` + `extension-core/review.workflow.json` | `/review`, `/review:status` | Triage + shared parallel review | triage → parallel review → synthesize |
 | `research.ts` | `/research`, `/research:status` | Bounded read-only investigation | research → cited evidence report |
@@ -16,7 +16,7 @@ Multi-phase, lifecycle-managed orchestration built on the shared `WorkflowEngine
 
 The build and PR-review parents own fanout through the shared review contract. Specialist reviewers inspect supplied context and repository state directly; ordinary child roles do not launch nested subagents. Workflow skill arrays are complete task-specific overrides: each task must list every skill it needs, including its interaction mode, rather than relying on role defaults.
 
-Planning and review tasks use `openai-codex/gpt-6-astra`. Implementation, fix, branch, and publication tasks use `openai-codex/gpt-5.6-sol`. `/vibe` runs up to ten review and fix rounds. It requires structured proof of a verified GitHub pull request before finalizing. Safety, ownership, credential, resource, or product-decision blockers stop the workflow without publishing.
+Planning and review tasks use `openai-codex/gpt-6-astra`. Implementation, fix, branch, and publication tasks use `openai-codex/gpt-5.6-sol`. `/founder-mode` runs up to ten review and repair rounds. It chooses the smallest reversible interpretation of ordinary product, scope, UX, and architecture ambiguity from repository evidence. Missing tests, validation gaps, and other recoverable problems enter the repair loop. One read-only retry may recreate malformed reviewer selection or synthesis output. Branch and publication proof never retries because those phases can mutate git or remote state. Credentials, conflicting requirements, unsafe or destructive operations, protected/shared writes, and ambiguous ownership stop the workflow without publishing. Finalization requires verified GitHub pull request proof.
 
 ## Conventions
 

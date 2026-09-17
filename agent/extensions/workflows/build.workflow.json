@@ -49,7 +49,7 @@
             "- likely edit surfaces and tests to inspect",
             "- explicit acceptance criteria",
             "- validation contract based on the project, not generic guesses",
-            "- risks or decisions that would require user approval",
+            "- consequential risks or decisions that repository evidence cannot settle safely",
             "",
             "Do not edit files."
           ]
@@ -78,7 +78,8 @@
             "- Keep edits small, reversible, and inside the approved scope.",
             "- Follow test-first discipline where applicable.",
             "- Run the most focused validation available and report commands plus outcomes.",
-            "- Stop instead of guessing on product, scope, security, destructive, or externally visible ambiguity."
+            "- Make routine reversible product, scope, UX, and architecture choices from repository evidence.",
+            "- Stop only when evidence cannot settle a consequential decision safely, or when credentials, ownership, destructive operations, protected/shared writes, or material security risk require user action."
           ]
         }
       ]
@@ -104,7 +105,9 @@
             "Rules:",
             "- You are the only writer for this fix phase.",
             "- Do not apply optional/deferred feedback; apply accepted in-scope fixes only.",
-            "- Do not make unapproved product, scope, security, destructive, or architecture decisions.",
+            "- Resolve routine reversible product, scope, UX, and architecture choices from repository evidence.",
+            "- Do not make destructive, ownership, credential, protected/shared-write, or material security decisions for the user.",
+            "- When the accepted issue is missing evidence, run the cheapest direct validation that resolves it.",
             "- Run focused validation for the fixes and report commands plus outcomes."
           ]
         }
