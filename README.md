@@ -23,7 +23,7 @@ pi install "$PWD"
 
 The `postinstall` script symlinks Markdown files under `agent/subagents/` into `~/.pi/agent/agents/` and `*.chain.md` files into `~/.pi/agent/chains/` for `pi-subagents` discovery. It respects `PI_CODING_AGENT_DIR` when set. Pi settings and keybindings are not installed by the package; they remain dotfiles/Home Manager concerns.
 
-Bundled plugin packages include `pi-subagents`, `pi-powerline-footer`, `pi-autoresearch`, `pi-prompt-composer`, and `pi-code-previews`.
+Bundled plugin packages include `pi-subagents`, `pi-powerline-footer`, `pi-autoresearch`, and `pi-prompt-composer`.
 
 This repo sets `legacy-peer-deps=true` in `.npmrc` so Git/local installs do not try to resolve Pi runtime packages that Pi itself provides to extensions.
 
