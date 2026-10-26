@@ -56,6 +56,11 @@ test("ship prompts are self-contained scoped approvals without fake hidden-skill
   assert.match(shipMode, /Direct `\/skill:ship-mode <exact commit or PR objective>` invocation grants/);
 });
 
+test("the write gate allows new files without requiring an impossible read", async () => {
+  const content = await read("extensions/discipline-gate.ts");
+  assert.match(content, /if \(targetPath && existsSync\(normalizeToolPath\(ctx\.cwd, targetPath\)\) && !this\.targetWasInspected\(ctx, targetPath\)\)/);
+});
+
 test("the mandatory quality-review gate routes its reviewer to Codex Astra", async () => {
   const content = await read("extensions/discipline-gate.ts");
   assert.match(content, /subagent\(\{ agent: "reviewer", model: "openai-codex\/gpt-6-astra", task:/);
