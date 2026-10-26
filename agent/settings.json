@@ -24,11 +24,6 @@
     "npm:pi-autoresearch",
     "git:git@github.com:JordanForeman/pi-prompt-composer.git@e242eefb2920c54bcaa4ba6fe7d3f33d66afad02"
   ],
-  "enabledModels": [
-    "claude-*",
-    "gpt-*",
-    "gemini-*"
-  ],
   "prompts": [
     "../agent/prompts/ship",
     "../agent/prompts/analyze",
