@@ -4,6 +4,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { isToolCallEventType } from "@earendil-works/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
+import { existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { GuardianExtensionCore } from "../extension-core/guardian-extension-core";
@@ -207,7 +208,7 @@ export class DisciplineGateExtension extends GuardianExtensionCore {
       // useful action is deterministic (read/search the file, then retry).
       if (WRITE_TOOLS.has(event.toolName)) {
         const targetPath = (event.input as { path?: string })?.path;
-        if (targetPath && !this.targetWasInspected(ctx, targetPath)) {
+        if (targetPath && existsSync(normalizeToolPath(ctx.cwd, targetPath)) && !this.targetWasInspected(ctx, targetPath)) {
           return {
             block: true,
             reason: `Blocked: read/search ${targetPath} before writing (search-before-write). Read or search the target file, then retry the write.`,
