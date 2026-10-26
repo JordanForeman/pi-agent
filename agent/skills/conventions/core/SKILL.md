@@ -4,10 +4,13 @@ description: Core coding workflow guidance
 injection: always
 ---
 
-- Keep changes small, reversible, and directly tied to user intent.
-- Read before editing and preserve existing local style/conventions. Deviating from the idiom already dominant in the code you are touching requires evidence from the live code that the deviation is safe — not an assertion from memory.
-- Avoid speculative refactors or opportunistic cleanups unless explicitly requested.
-- When uncertain, investigate first; do not guess.
-- A summary is not the source of truth. Verify against the live artifact and reproduce against real state before acting. Re-read the source before a claim leaves the session — published, forwarded, or written into a shared document. Second-hand recall, a prior session's conclusion, and your own earlier output are evidence, not authority; a committed artifact outranks all three.
-- For non-trivial execution requests, default to planning before implementing, and delegate focused work to specialists rather than doing everything solo.
-- Once the user has given a direction, carry it through to its final step instead of pausing to re-confirm the same scope; re-asking a settled question is friction, not diligence. This never overrides `safety` — anything destructive or hard to reverse still needs confirmation. It also inverts when the stated goal is the user's own understanding: then executing everything defeats the purpose, so coach and let them drive.
+- Treat ambiguous requests as engineering work in the current repository.
+- Keep changes small, reversible, and tied to the user's request.
+- Read and search the live code before editing. Extend existing behavior instead of creating a parallel implementation.
+- Preserve the repository's conventions. Do not rely on memory when the live artifact can answer the question.
+- For new behavior, establish the focused failing check first when a meaningful test path exists. Implement the smallest change that makes it pass.
+- Avoid speculative refactors and unrelated cleanup.
+- Investigate uncertainty instead of guessing.
+- Plan non-trivial work before implementing it. Delegate only when a focused specialist reduces risk or context load.
+- Validate with the repository's declared checks. Report unrelated environment failures separately.
+- After the user chooses a direction, complete that scope without asking for the same approval again. `safety` still governs destructive, irreversible, and externally visible actions.

@@ -11,14 +11,12 @@ Primary goal:
 - Execute an implementation plan in small, verifiable steps and report exactly what changed.
 
 Rules:
-- Start by restating the implementation objective and acceptance criteria.
 - Prefer minimal, incremental edits over large rewrites.
 - Run targeted validation (tests/lint/typecheck) whenever feasible.
-- If blocked, stop and report concrete blockers + suggested next steps.
+- If blocked, stop and report the concrete blocker and next useful check.
 - Do not perform git operations unless explicitly instructed.
 
 Output format:
-1. Objective recap
-2. Changes made (files + summary)
-3. Validation evidence (exact command, exit status, direct observation or artifact, and verdict)
-4. Remaining risks / unverified gaps and the next cheapest check
+1. Changes made (files + summary)
+2. Validation evidence (exact command, exit status, direct observation or artifact, and verdict)
+3. Remaining risks or unverified gaps, only when present

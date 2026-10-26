@@ -41,6 +41,64 @@ function engineFixture(t, count = 1, transition = { type: "advance" }, execution
 }
 
 const foreground = { agent: "builder", task: "Work", async: false };
+const phaseInstructions = (h) => h.emit("before_agent_start", { prompt: h.messages.at(-1), systemPrompt: "Base prompt" }).systemPrompt;
+const phaseCalls = (h) => [...phaseInstructions(h).matchAll(/```json\n([\s\S]*?)\n```/g)].map((match) => JSON.parse(match[1]));
+
+test("phase dispatch details stay in system guidance instead of the visible message", (t) => {
+  const h = engineFixture(t);
+
+  assert.equal(h.messages.length, 1);
+  assert.equal(h.messages[0], '**Workflow "Test" — Phase 1/2: First**');
+
+  const injected = phaseInstructions(h);
+  assert.match(injected, /"agent": "worker-0"/);
+  assert.match(injected, /"task": "Work"/);
+  assert.match(injected, /Do not add a separate phase recap/);
+  assert.doesNotMatch(injected, /return its final output once/i);
+});
+
+test("the final phase returns the child output once", (t) => {
+  const h = engineFixture(t);
+  h.result(result("single", [child("worker-0")]));
+  h.emit("agent_end");
+
+  assert.equal(h.engine.getStatus().context.currentPhase, "next");
+  const injected = phaseInstructions(h);
+  assert.match(injected, /return its final output once/i);
+  assert.doesNotMatch(injected, /Do not add a separate phase recap/);
+});
+
+test("compact workflow context keeps structured receipt fields without raw prose", (t) => {
+  const h = engineFixture(t);
+  h.result(result("single", [child("worker-0", { finalOutput: "Verdict: CLEAN\n- Finding from worker-0\nLong narrative that should stay in the child artifact." })]));
+  h.emit("agent_end");
+
+  const output = h.engine.getStatus().context.phases.first.outputs[0].result;
+  assert.equal(output.match(/Finding from worker-0/g)?.length, 1);
+  assert.match(output, /Verdict: CLEAN/);
+  assert.doesNotMatch(output, /Long narrative|Summary:|Context:/);
+});
+
+test("explicit compact summaries appear once", (t) => {
+  const h = engineFixture(t);
+  h.engine.getStatus().definition.phases[0].summarizeOutput = () => ({ summary: "Bounded summary", topFindings: ["Distinct finding"] });
+  h.result(result("single", [child("worker-0", { finalOutput: "Raw child narrative" })]));
+  h.emit("agent_end");
+
+  const output = h.engine.getStatus().context.phases.first.outputs[0].result;
+  assert.equal(output.match(/Bounded summary/g)?.length, 1);
+  assert.equal(output.match(/Distinct finding/g)?.length, 1);
+  assert.doesNotMatch(output, /Raw child narrative/);
+});
+
+test("full context mode preserves raw child output", (t) => {
+  const h = engineFixture(t);
+  h.engine.getStatus().definition.phases[0].contextMode = "full";
+  h.result(result("single", [child("worker-0", { finalOutput: "Complete raw evidence" })]));
+  h.emit("agent_end");
+
+  assert.equal(h.engine.getStatus().context.phases.first.outputs[0].result, "Complete raw evidence");
+});
 
 for (const toolExecution of ["parallel", "sequential"]) {
   test(`installed Pi loop blocks all sibling dispatches (${toolExecution})`, { skip: !process.env.PI_AGENT_LOOP_MODULE }, async (t) => {
@@ -203,9 +261,7 @@ for (const mode of ["single", "parallel", "chain"]) {
 for (const count of [1, 3]) {
   test(`generated phase calls require foreground (${count} tasks)`, (t) => {
     const h = engineFixture(t, count);
-    const call = JSON.parse(h.messages[0].match(/```json\n([\s\S]*?)\n```/)[1]);
-    assert.equal(call.async, false);
-    assert.match(h.emit("before_agent_start", { systemPrompt: "base" }).systemPrompt, /async.*false/);
+    for (const call of phaseCalls(h)) assert.equal(call.async, false);
   });
 }
 
@@ -214,7 +270,7 @@ for (const [count, execution] of [[1, "sequential"], [1, "parallel"], [3, "paral
     // Deliberately synthetic IDs: payload tests do not claim provider availability.
     const overrides = [{ model: "test-provider/core:high", skill: ["testing"] }, { model: "test-provider/selector" }];
     const h = engineFixture(t, count, { type: "advance" }, execution, overrides);
-    const calls = [...h.messages[0].matchAll(/```json\n([\s\S]*?)\n```/g)].map((match) => JSON.parse(match[1]));
+    const calls = phaseCalls(h);
     const tasks = calls.flatMap((call) => call.tasks ?? [call]);
     assert.equal(tasks.length, count);
     for (const call of calls) assert.equal(call.async, false);
@@ -225,17 +281,15 @@ for (const [count, execution] of [[1, "sequential"], [1, "parallel"], [3, "paral
       assert.equal(task.task, "Work");
     });
     assert.deepEqual(tasks[0].skill, ["testing"]);
-    const instructions = h.emit("before_agent_start", { systemPrompt: "base" }).systemPrompt;
-    for (const override of overrides.slice(0, count)) assert.ok(instructions.includes(override.model));
   });
 }
 
 for (const count of [1, 3]) {
   test(`omitted models preserve inheritance (${count} tasks)`, (t) => {
     const h = engineFixture(t, count);
-    const call = JSON.parse(h.messages[0].match(/```json\n([\s\S]*?)\n```/)[1]);
-    for (const task of call.tasks ?? [call]) assert.equal(Object.hasOwn(task, "model"), false);
-    assert.doesNotMatch(h.emit("before_agent_start", { systemPrompt: "base" }).systemPrompt, /Model:/);
+    for (const call of phaseCalls(h)) {
+      for (const task of call.tasks ?? [call]) assert.equal(Object.hasOwn(task, "model"), false);
+    }
   });
 }
 

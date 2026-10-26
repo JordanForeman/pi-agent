@@ -9,6 +9,13 @@ import test from "node:test";
 const ASTRA_MODEL = "openai-codex/gpt-6-astra";
 const SOL_MODEL = "openai-codex/gpt-5.6-sol";
 
+function currentDispatch(handlers, message, ctx) {
+  const event = { prompt: message, systemPrompt: "Base prompt" };
+  const systemPrompt = handlers.get("before_agent_start")(event, ctx).systemPrompt;
+  const match = [...systemPrompt.matchAll(/```json\n([\s\S]*?)\n```/g)].at(-1);
+  return JSON.parse(match[1]);
+}
+
 // Copy contracts so model tests never configure live workflows or providers.
 async function loadFixture(t, kind, model) {
   const root = await mkdtemp(path.join(tmpdir(), "pi-workflow-model-test-"));
@@ -78,8 +85,9 @@ test("plan command dispatches its planner through Codex Astra", async (t) => {
   });
   t.after(() => handlers.get("session_shutdown")?.({}, { hasUI: false }));
 
-  await commands.get("plan").handler("Add a cache", { hasUI: false });
-  const call = JSON.parse(messages[0].match(/```json\n([\s\S]*?)\n```/)[1]);
+  const ctx = { hasUI: false };
+  await commands.get("plan").handler("Add a cache", ctx);
+  const call = currentDispatch(handlers, messages[0], ctx);
   assert.equal(call.agent, "planner");
   assert.equal(call.model, ASTRA_MODEL);
   assert.match(call.task, /Add a cache/);
@@ -103,7 +111,7 @@ for (const kind of ["build", "review"]) {
         const ctx = { hasUI: false };
         t.after(() => handlers.get("session_shutdown")?.({}, ctx));
         await commands.get("build").handler("Fixture objective", ctx);
-        const call = JSON.parse(messages[0].match(/```json\n([\s\S]*?)\n```/)[1]);
+        const call = currentDispatch(handlers, messages[0], ctx);
         assert.equal(call.async, false);
         tasks = [call];
       }

@@ -1,7 +1,7 @@
 ---
 name: delegation-topology
 description: Pi-specific delegation mechanisms and slash-command topology
-injection: always
+injection: explicit
 ---
 
 Pi wiring for the delegation shapes described in `tool-usage`. This maps portable delegation intent onto concrete Pi mechanisms.

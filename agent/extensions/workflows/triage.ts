@@ -13,6 +13,7 @@ const TRIAGE_WORKFLOW: WorkflowDefinition = {
       id: "investigate",
       label: "🔍 Parallel investigation",
       execution: "parallel",
+      contextMode: "full",
       tasks: [
         {
           agent: "code-explorer",

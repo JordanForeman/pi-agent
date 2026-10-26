@@ -60,9 +60,10 @@ The engine manages lifecycle and state. The LLM executes phases by calling the `
 1. **Engine** sets up workflow state and injects phase instructions via `before_agent_start`
 2. **LLM** reads phase instructions, calls `subagent` tool with the right agent + task
 3. **Engine** listens for `tool_execution_end` events where `toolName === "subagent"` to detect phase completion
-4. **Engine** captures the subagent result, updates context, transitions to next phase
-5. **Engine** sends a follow-up message with next phase instructions via `pi.sendUserMessage()`
-6. Repeat until workflow completes
+4. **Engine** captures the subagent result, updates context, and transitions to the next phase
+5. **Engine** sends one short, human-visible phase marker via `pi.sendUserMessage()`
+6. **Engine** puts the exact dispatch payload in the system prompt for that turn
+7. Repeat until workflow completes
 
 ### What if pi-subagents goes away?
 
@@ -251,15 +252,21 @@ When the engine is active, it adds a block to the system prompt via `before_agen
 
 **Current phase: 🔴 Write failing tests** (phase 1 of 3)
 
-Execute this phase by using the `subagent` tool:
-- Agent: `builder`
-- Required capabilities: `filesystem-write`, `shell`
-- Task: "Establish strict red evidence for [user's input]. Prefer a meaningful focused failing test; do not write implementation code. If honest testing would require disproportionate scaffolding, run and justify the closest executable failing check."
+Dispatch this exact `subagent` payload:
+```json
+{
+  "async": false,
+  "agent": "builder",
+  "task": "Establish strict red evidence for [user's input]."
+}
+```
 
-After the subagent completes, report the outcome. The workflow engine advances after a successful phase and stops an `advance` workflow when the phase fails.
-
+Do not resume interrupted or detached children automatically.
+The workflow engine records the result and advances the phase. Do not add a separate phase recap.
 **Do not skip phases or execute future phases prematurely.**
 ```
+
+Intermediate phases suppress recaps. The final phase instead tells the parent to return the child's final output once as the workflow answer, without adding another summary.
 
 ### Phase completion detection
 
@@ -286,9 +293,12 @@ for the remaining phase work so count-based completion cannot hang. Both the eve
 error flag and nested result error flag are honored. Legacy unstructured results
 still count as one dispatch.
 
-Each completion is compacted against the next pending task, retaining the child's
-agent, final output, exit/error status, and artifact path in its receipt. Outputs
-are capped at the phase's expected task count; a batch-level error does not mark
+Each completion is recorded against the next pending task. Compact mode keeps a
+structured receipt with the agent, status, artifact path, verdict, and bounded top
+findings. It includes prose only when a workflow supplies an explicit summarizer;
+it never labels a truncated raw prefix as a summary. Full mode preserves the raw
+child output for phases whose downstream gates need complete evidence. Outputs are
+capped at the phase's expected task count; a batch-level error does not mark
 successful children as failed. Interrupted or detached children are errors even
 with exit code zero. They immediately fail the phase and release workflow ownership,
 including partial/mixed batches, without invoking advance, conditional, or loop
@@ -309,7 +319,7 @@ strings, including inside `requires`; comments cannot make expressions literal.
 
 After the agent turn ends (`agent_end`), once all expected task outputs are present,
 the engine records the phase result, evaluates the transition rule and either:
-- Sends the next phase's instructions via `pi.sendUserMessage()`
+- Sends a short marker that starts the next phase; the system prompt owns its dispatch payload
 - Notifies completion if the workflow is done
 
 ## Example: TDD Workflow Extension

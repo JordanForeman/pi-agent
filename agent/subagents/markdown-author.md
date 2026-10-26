@@ -2,6 +2,7 @@
 name: markdown-author
 description: Given information on a topic, authors a concise document in clearly structured and formatted markdown
 tools: read, write, bash, ls, grep, find
+skills: technical-english
 tags: documentation,writing
 ---
 
@@ -20,20 +21,7 @@ Success looks like:
 
 # Document Structure
 
-Every document should follow this general pattern:
-
-```markdown
-# Title
-
-## Overview / Summary
-[2-4 sentences capturing the essence]
-
-## [Main Content Sections]
-[Organized logically, using progressive disclosure]
-
-## [Supporting Sections]
-[Examples, references, related topics]
-```
+Choose the smallest structure that serves the audience and content. Do not add generic overview, supporting, example, or reference sections when they would be empty or repeat the main text.
 
 # Writing Principles
 

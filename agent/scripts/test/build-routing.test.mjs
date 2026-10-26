@@ -17,6 +17,13 @@ const publication = (overrides = {}) => JSON.stringify({
   ...overrides,
 });
 
+function currentDispatch(handlers, messages, ctx) {
+  const event = { prompt: messages.at(-1), systemPrompt: "Base prompt" };
+  const systemPrompt = handlers.get("before_agent_start")(event, ctx).systemPrompt;
+  const match = [...systemPrompt.matchAll(/```json\n([\s\S]*?)\n```/g)].at(-1);
+  return JSON.parse(match[1]);
+}
+
 async function loadFixture(t, mutate = () => {}, entry = "build") {
   const root = await mkdtemp(path.join(tmpdir(), "pi-build-routing-"));
   t.after(() => rm(root, { recursive: true, force: true }));
@@ -44,7 +51,7 @@ async function fixture(t, mutate, commandName = "build") {
   return { engine, messages,
     get context() { return engine.getStatus().context; },
     get phase() { return this.context.currentPhase; },
-    get call() { return JSON.parse(messages.at(-1).match(/```json\n([\s\S]*?)\n```/)[1]); },
+    get call() { return currentDispatch(handlers, messages, ctx); },
     emit: (event, data = {}) => handlers.get(event)?.(data, ctx),
     complete(text = "Inspected src/service.ts; validation passed.", options = {}) {
       const tasks = this.call.tasks ?? [this.call];
@@ -71,7 +78,6 @@ for (const chosen of [[], [roles[3]], [roles[0], roles[3]]]) test(`core first, t
   }
   assert.equal(h.phase, "synthesize"); h.complete("Verdict: BUILD_CLEAN\nNo outstanding findings.");
   assert.equal(h.phase, "finalize"); assert.equal(h.context.state.finalVerdict, "BUILD_CLEAN");
-  for (const message of h.messages) for (const match of message.matchAll(/```json\n([\s\S]*?)\n```/g)) assert.equal(JSON.parse(match[1]).async, false);
 });
 
 const invalidSelections = {
@@ -241,16 +247,16 @@ test("standalone review retains fixed five reviewers and foreground dispatch", a
   const commands = new Map(); const handlers = new Map(); const messages = []; const ctx = { hasUI: false };
   module.default({ registerCommand: (name, command) => commands.set(name, command), on: (name, handler) => handlers.set(name, handler), sendUserMessage: (text) => messages.push(text) });
   t.after(() => handlers.get("session_shutdown")?.({}, ctx)); await commands.get("review").handler("Review", ctx);
-  const triage = JSON.parse(messages.at(-1).match(/```json\n([\s\S]*?)\n```/)[1]);
+  const triage = currentDispatch(handlers, messages, ctx);
   assert.equal(triage.model, "openai-codex/gpt-6-astra");
   handlers.get("tool_execution_end")({ toolName: "subagent", result: { details: { mode: "single", results: [{ agent: "pr-triage", exitCode: 0, finalOutput: "No specialists apply" }] } }, isError: false }, ctx);
   handlers.get("agent_end")({}, ctx);
-  const call = JSON.parse(messages.at(-1).match(/```json\n([\s\S]*?)\n```/)[1]); assert.equal(call.async, false);
+  const call = currentDispatch(handlers, messages, ctx); assert.equal(call.async, false);
   assert.deepEqual(call.tasks.map((task) => task.agent), [...roles, "reviewer"]);
   for (const task of call.tasks) assert.equal(task.model, "openai-codex/gpt-6-astra");
   handlers.get("tool_execution_end")({ toolName: "subagent", result: { details: { mode: "parallel", results: call.tasks.map((task) => ({ agent: task.agent, exitCode: 0, finalOutput: `Finding from ${task.agent}` })) } }, isError: false }, ctx);
   handlers.get("agent_end")({}, ctx);
-  const synthesis = JSON.parse(messages.at(-1).match(/```json\n([\s\S]*?)\n```/)[1]);
+  const synthesis = currentDispatch(handlers, messages, ctx);
   assert.equal(synthesis.agent, "reviewer"); assert.equal(synthesis.async, false);
   assert.equal(synthesis.model, "openai-codex/gpt-6-astra");
   for (const task of call.tasks) assert.ok(synthesis.task.includes(`Finding from ${task.agent}`));
@@ -304,10 +310,9 @@ for (const oversized of ["core", "selection", "specialists", "all"]) test(`compl
   h.complete("", { children: specialists }); assert.equal(h.phase, "synthesize");
   const required = [core, selector, ...specialists.map((child) => child.finalOutput)];
   const assertDelivered = () => {
-    const instructions = h.emit("before_agent_start", { systemPrompt: "base" }).systemPrompt;
     for (const text of required) {
       assert.ok(h.call.task.includes(text), `complete evidence missing from ${h.phase} task: ${text.slice(0, 40)}`);
-      assert.ok(instructions.includes(text), `complete evidence missing from ${h.phase} instructions`);
+      assert.ok(h.messages.every((message) => !message.includes(text)), `evidence leaked into visible ${h.phase} message`);
     }
     assert.doesNotMatch(h.call.task, /\[truncated \d+ chars\]/);
   };

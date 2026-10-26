@@ -2,24 +2,6 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { InterceptorExtensionCore } from "../extension-core/interceptor-extension-core";
 import { allowGenericOrchestrationReminders } from "./runtime-reminder-policy.mjs";
 
-const COMPLEX_PROMPT_KEYWORDS = [
-  "implement",
-  "investigate",
-  "refactor",
-  "migrate",
-  "design",
-  "architecture",
-  "plan",
-  "workflow",
-  "multi-step",
-  "build",
-  "create",
-  "ship",
-  "spin up",
-  "marketing site",
-  "landing page",
-];
-
 function extractToolResultText(event: any): string {
   if (!Array.isArray(event.content)) return "";
 
@@ -36,12 +18,6 @@ function looksLikePermissionDenial(text: string): boolean {
 
 function looksLikeEditDrift(text: string): boolean {
   return /(old_string|old text|not found|not unique|failed to match exact)/i.test(text);
-}
-
-function isComplexPrompt(prompt: string): boolean {
-  const lower = prompt.toLowerCase();
-  if (lower.length > 180) return true;
-  return COMPLEX_PROMPT_KEYWORDS.some((keyword) => lower.includes(keyword));
 }
 
 function hasDesignIntent(prompt: string): boolean {
@@ -67,12 +43,6 @@ function hasDesignIntent(prompt: string): boolean {
   return signals.some((signal) => lower.includes(signal));
 }
 
-function looksLikeExecutionObjective(prompt: string): boolean {
-  const lower = prompt.toLowerCase();
-  const executionSignals = ["implement", "build", "create", "ship", "spin up", "deliver", "set up"];
-  return executionSignals.some((signal) => lower.includes(signal));
-}
-
 function requestsParallelExecution(prompt: string): boolean {
   const lower = prompt.toLowerCase();
   return (
@@ -84,17 +54,12 @@ function requestsParallelExecution(prompt: string): boolean {
   );
 }
 
-function shouldDefaultToDelegation(prompt: string): boolean {
-  return looksLikeExecutionObjective(prompt) || isComplexPrompt(prompt);
-}
-
 function registerRuntimeReminders(pi: ExtensionAPI) {
   let turnCount = 0;
 
   let pendingPermissionReminder = false;
   let pendingEditDriftReminder = false;
 
-  let lastDelegationReminderTurn = -100;
   let lastContextReminderTurn = -100;
 
   pi.on("tool_result", async (event) => {
@@ -134,16 +99,6 @@ function registerRuntimeReminders(pi: ExtensionAPI) {
     }
 
     const allowGenericReminders = allowGenericOrchestrationReminders(event.prompt);
-
-    if (allowGenericReminders && shouldDefaultToDelegation(event.prompt) && turnCount - lastDelegationReminderTurn >= 1) {
-      reminders.push(
-        "Standard operating procedure: start with a brief plan, then execute via `subagent` using the smallest viable mode (single, chain, or parallel)."
-      );
-      reminders.push(
-        "Avoid over-coordination. Pick one specialist first, then expand to chain/parallel only when decomposition is clearly beneficial."
-      );
-      lastDelegationReminderTurn = turnCount;
-    }
 
     if (allowGenericReminders && requestsParallelExecution(event.prompt)) {
       reminders.push(
