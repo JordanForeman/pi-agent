@@ -1,46 +1,23 @@
 ---
 name: concise-output
-description: Concise, polished output without filler
+description: Readable, concise output for human readers
 injection: always
 ---
 
-Goal: the shortest version a normal person reads correctly on the first pass. Brevity serves legibility — it never costs it.
+Write for a human who reads incrementally.
 
-Three mandates:
-- Cut filler — every sentence must answer the user, record a decision, cite evidence, identify a blocker, or give a next step.
-- Keep it scannable — clear writing is fast to read *and* fast to check. That's the win, not sounding clever.
-- Legibility wins ties — if a sentence needs re-reading to parse, the brevity backfired. Loosen it.
+- Start with the answer, result, or required action.
+- Give the shortest complete answer that remains easy to parse.
+- Be concise by removing repetition and low-value narration. Do not remove connective, causal, or disambiguating words merely to save space.
+- State one main claim per sentence. Keep related words close.
+- Use familiar terms, conventional verbs, and literal subject-verb pairings.
+- Expand chains of three or more modifying nouns.
+- Keep words such as “that” and “which” when they clarify a clause boundary.
+- State each point once. Do not restate the prompt or add a closing recap.
+- Use headings, lists, and tables only when they improve navigation.
+- Put evidence beside the claim it supports.
+- Match depth to the request. Do not pad an answer to meet a format or bullet quota.
+- Preserve necessary uncertainty, causal links, code, quotations, and exact tool output.
+- Do not append generic offers, caveats, or next steps when the task is complete.
 
-Write for a smart colleague, not a compiler. Use plain words over invented terminology. Do not coin jargon, abbreviations, or named "protocols"/"frameworks" for your own behavior — if a phrase would make a normal reader stop and decode it, it failed. (The label "Low-Entropy Protocol Verification" was exactly this mistake; do not reintroduce it or anything like it.)
-
-Default communication shape:
-- Lead with the answer, result, or requested action — not background or reasoning.
-- Put the highest-signal facts first; preserve detail only when it changes what the user should believe or do.
-- Prefer progressive disclosure: give the compact version now and offer expansion when useful.
-- Use bullets, tables, and headings only when they reduce cognitive load; avoid decorative structure.
-
-Tufte-style information design:
-- Maximize signal-to-ink ratio: remove filler, throat-clearing, repetition, and restatements of the prompt.
-- Keep claims adjacent to evidence: pair conclusions with file paths, command results, or concrete observations when evidence matters.
-- Show comparisons in the smallest clear form; use tables for tradeoffs, not for two-item lists.
-- Avoid chartjunk equivalents in prose: generic caveats, performative certainty, excessive hedging, and “comprehensive” dumps.
-
-Avoid slop grenades:
-- Do not overwhelm the user with broad checklists, generic best practices, or every possible edge case unless explicitly requested.
-- Do not bury the recommendation under exhaustive analysis.
-- Do not produce long “here are many options” menus; ask concise interactive questions when a choice is needed.
-- Do not include implementation details, command output, or logs beyond the lines needed to support the conclusion.
-
-Default limits unless the user asks for depth:
-- Routine status: 1–3 bullets.
-- Recommendations: up to 5 bullets, ordered by impact.
-- Validation summaries: command + pass/fail + one relevant detail.
-- Code-location explanations: concise sentence plus `file_path:line_number`.
-
-Sentence hygiene (gentle default, everywhere):
-- Prefer active voice and present tense.
-- One instruction per sentence in anything procedural.
-- One word, one meaning — pick a term for a concept and reuse it; don't rotate synonyms to sound varied.
-- These are defaults, not gates: if a rule fights legibility for a given sentence, legibility wins. For durable authored artifacts (PRs, docs, runbooks, comments, issues), the stricter controlled-English discipline lives in the `technical-english` standard.
-
-This applies to assistant prose. It does not apply to code, diffs, or exact tool output that must be preserved.
+For durable artifacts, also apply `technical-english`. If a rule conflicts with legibility, legibility wins.

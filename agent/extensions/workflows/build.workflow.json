@@ -35,6 +35,7 @@
       "id": "plan",
       "label": "🧭 Plan scope and validation",
       "execution": "sequential",
+      "contextMode": "full",
       "tasks": [
         {
           "agent": "planner",

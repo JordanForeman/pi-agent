@@ -1,7 +1,7 @@
 ---
 name: test-first
 description: Use red-green-refactor for new behavior, with a bounded exception for misleading or disproportionate tests
-injection: always
+injection: explicit
 ---
 
 For new behavior, bug fixes, integrations, and utilities, use red → green → refactor:

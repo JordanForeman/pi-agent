@@ -1,7 +1,7 @@
 ---
 name: tool-usage
 description: Tool selection policy
-injection: always
+injection: explicit
 ---
 
 - Prefer dedicated tools for file operations over shell command workarounds.

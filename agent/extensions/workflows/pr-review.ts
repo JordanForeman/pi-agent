@@ -12,6 +12,7 @@ const PR_REVIEW_WORKFLOW: WorkflowDefinition = {
       id: "triage",
       label: "🔍 Triage changes",
       execution: "sequential",
+      contextMode: "full",
       tasks: [{
         agent: "pr-triage",
         requires: ["shell"],
@@ -37,12 +38,10 @@ const PR_REVIEW_WORKFLOW: WorkflowDefinition = {
     }),
     createSharedReviewSynthesisPhase({
       verdict_instructions: [
-        "Produce:",
-        "1. **Summary verdict** — overall assessment of the changes",
-        "2. **Blockers** — issues that must be resolved before merge (if any)",
-        "3. **Non-blocking improvements** — suggestions ranked by impact",
-        "4. **Security findings** — any security concerns surfaced during review",
-        "5. **Go/no-go recommendation** with clear justification",
+        "Start with one go/no-go verdict and its reason.",
+        "List blockers before lower-severity findings.",
+        "Include a section only when it contains a concrete finding, validation gap, or required next action.",
+        "Do not repeat the verdict or findings in a closing recap.",
       ].join("\n"),
     }),
   ],

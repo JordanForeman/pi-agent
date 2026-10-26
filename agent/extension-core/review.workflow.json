@@ -4,7 +4,7 @@
     "id": "review",
     "label": "🔎 Parallel review",
     "execution": "parallel",
-    "contextMode": "compact",
+    "contextMode": "full",
     "tasks": [
       {
         "agent": "design-reviewer",

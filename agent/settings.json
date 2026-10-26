@@ -4,6 +4,10 @@
   "defaultProvider": "openai-codex",
   "defaultModel": "gpt-5.5",
   "defaultThinkingLevel": "medium",
+  "hideThinkingBlock": true,
+  "quietStartup": "header",
+  "fullscreenExitOutput": "resume-hint",
+  "treeFilterMode": "no-tools",
   "compaction": {
     "enabled": true,
     "reserveTokens": 16384,
@@ -18,7 +22,7 @@
     "npm:pi-subagents",
     "npm:pi-powerline-footer",
     "npm:pi-autoresearch",
-    "git:git@github.com:JordanForeman/pi-prompt-composer.git@1ccb7c4e2d9d491035bb456e9e99222d07f53d23"
+    "git:git@github.com:JordanForeman/pi-prompt-composer.git@e242eefb2920c54bcaa4ba6fe7d3f33d66afad02"
   ],
   "enabledModels": [
     "claude-*",

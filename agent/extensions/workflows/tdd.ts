@@ -11,6 +11,7 @@ const TDD_WORKFLOW: WorkflowDefinition = {
       id: "red",
       label: "🔴 Write failing tests",
       execution: "sequential",
+      contextMode: "full",
       tasks: [{
         agent: "builder",
         requires: ["filesystem-write", "shell"],
@@ -32,6 +33,7 @@ const TDD_WORKFLOW: WorkflowDefinition = {
       id: "green",
       label: "🟢 Make tests pass",
       execution: "sequential",
+      contextMode: "full",
       tasks: [{
         agent: "builder",
         requires: ["filesystem-write", "shell"],

@@ -30,7 +30,7 @@
   "dependencies": {
     "pi-autoresearch": "^1.6.0",
     "pi-powerline-footer": "^0.5.6",
-    "pi-prompt-composer": "git+ssh://git@github.com/JordanForeman/pi-prompt-composer.git#1ccb7c4e2d9d491035bb456e9e99222d07f53d23",
+    "pi-prompt-composer": "git+ssh://git@github.com/JordanForeman/pi-prompt-composer.git#e242eefb2920c54bcaa4ba6fe7d3f33d66afad02",
     "pi-subagents": "^0.27.0"
   },
   "bundledDependencies": [

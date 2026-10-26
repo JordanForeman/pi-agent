@@ -69,7 +69,7 @@ function normalizeChoices(rawChoices: Array<string | { label: string; value?: st
 }
 
 function buildSystemPrompt(basePrompt: string): string {
-  return `${basePrompt}\n\n[pi-ask extension]\nRule: if you are about to ask the user to pick from 2+ choices, you MUST call ask_user instead of writing the choices in plain assistant text.\nThis includes "what should we do next?", tradeoff menus, option A/B/C prompts, and clarification checklists.\nKeep choices concise (3-6 options), and default allowAdditionalText=true so the user can press Tab on a selected option to add nuance.\nFor each choice: label = the action/path (short, scannable), description = tradeoffs, pros/cons, or key context (optional, one line).\nIf your question needs setup/context before the choices, pass it via ask_user.context so it is visible in the selector UI.\nSelf-check before sending: if your draft contains a numbered/bulleted choice list for the user, replace it with ask_user.`
+  return `${basePrompt}\n\n[pi-ask extension]\nWhen the user must choose among two or more paths, call ask_user with 3–6 concise, distinct choices and allowAdditionalText=true.`
 }
 
 function renderInlineCursor(text: string, cursor: number, focused: boolean): string {

@@ -11,21 +11,19 @@ This governs **authored artifacts**, not conversational reasoning. Do not force 
 ### Sentence rules
 
 - **One instruction per sentence** in procedures. Split compound steps.
-- **Keep sentences short.** Aim for ≤20 words in instructions, ≤25 in descriptions. Length is a signal, not a hard gate — a longer sentence that stays at one level of thought is fine.
-- **Active voice.** "The job retries the request," not "the request is retried."
+- **Keep dependencies local.** Put the actor near the action and a qualifier near what it modifies. Split a sentence when its main relationship becomes hard to hold in memory.
+- **Use active voice when the actor matters.** Do not force active voice when it creates an unnatural subject and verb pairing.
+- **Use literal, conventional predicates.** Prefer “the edge case causes an error” to “the edge case bites.”
 - **Present tense** for how things behave. "The consumer drops the event," not "the event will be dropped."
 - **Imperative for instructions.** "Run the migration," not "the migration should be run" or "you would run."
-- **Do not compress by dropping words.** Keep articles and connectives. Clarity beats terseness — this is where STE and raw brevity diverge, and clarity wins.
+- **Do not compress by dropping words.** Keep articles, connectives, and clause markers when they help a reader parse the sentence.
 
 ### One word, one meaning
 
 - Pick one term for a concept and keep it for the whole artifact. Do not rotate synonyms to sound varied — in technical writing, a new word signals a new thing.
-- Prefer the plain, specific verb for an action and reuse it:
-  - **remove** (not delete/drop/strip/purge) for taking a thing out
-  - **add** (not introduce/create/wire-up) for putting a thing in
-  - **run** (not execute/invoke/kick-off) for starting a command or job
-  - **fail** (not break/blow-up/die) for an error path
-- The point is not this exact list — it is the habit. When a concept recurs, name it once and hold the name.
+- Use the established domain term. Words such as `remove`, `delete`, and `drop` can name different operations.
+- Prefer a familiar, specific verb. Avoid turning a noun into a novel verb when a conventional phrase is clearer.
+- When a concept recurs, keep its name stable instead of rotating synonyms for variety.
 
 ### Structure
 
@@ -53,8 +51,6 @@ When you put text inside quote marks, you assert it appears that way in the sour
 
 An artifact can be accurate and still fail its reader. When prose reads as dense or as generated filler, cutting words is only half the fix — the other half is restructuring so the reader does not have to translate. Size the artifact to the complexity of the thing it describes: a straightforward task does not earn a long body, and an option menu belongs collapsed into one decision point with only the load-bearing evidence retained.
 
-These standards govern the **published artifact body**, not only the summary you write about it in chat. When feedback lands on "this is too verbose," confirm which artifact is meant before revising.
+These standards govern the **published artifact body**, not only the summary you write about it in chat. When feedback says an artifact is too verbose, revise that artifact rather than only shortening the chat summary.
 
-Avoid the tells of generated prose. The em-dash is the loudest: where one is doing a label's or a clause's work, a colon, comma, or period usually reads better. Treat this as a preference applied to new prose, not a mandate to sweep existing text — a reader who thinks "this looks machine-written" has stopped reading the content.
-
-If a rule here fights legibility for a specific sentence, legibility wins — same tie-breaker as `concise-output`.
+If a rule here fights legibility for a specific sentence, legibility wins.

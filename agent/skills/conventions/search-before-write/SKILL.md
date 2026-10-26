@@ -1,7 +1,7 @@
 ---
 name: search-before-write
 description: Prove what already exists before writing or editing code
-injection: always
+injection: explicit
 ---
 
 Before writing new code or editing existing code, establish what already exists. Never claim functionality is missing, duplicated, or absent without evidence.

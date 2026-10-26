@@ -88,12 +88,14 @@ find agent/extensions/workflows -maxdepth 1 -type f -name '*.ts' -print | sort
 - Chain discovery: bootstrapped symlinks from `agent/subagents/*.chain.md` into `~/.pi/agent/chains/`
 
 **prompt-composer** is loaded as part of this package, and may also be installed separately in dotfiles-managed setups:
-- Bundled dependency source: `git+ssh://git@github.com/JordanForeman/pi-prompt-composer.git#1ccb7c4e2d9d491035bb456e9e99222d07f53d23`
+- Bundled dependency source: `git+ssh://git@github.com/JordanForeman/pi-prompt-composer.git#e242eefb2920c54bcaa4ba6fe7d3f33d66afad02`
 - It composes runtime guidance from the synced `agent/skills/**/SKILL.md` metadata.
 
 ### Skill activation policy
 
-The four injection modes remain distinct: `always` applies universal guidance, `detect` uses local rules, `classify` is eligible for semantic selection, and `explicit` activates only when requested or directly injected. Automatic classify-only activation is disabled because the package default has no classifier and enabling one would send the current prompt plus classify-skill descriptions to an external model provider, adding latency and cost. Classify-only capabilities remain available through `/skill:<name>` and through explicit prompt/subagent skill arrays. This repository does not enable automatic classifier calls or patch `pi-prompt-composer`.
+The four injection modes remain distinct: `always` applies universal guidance, `detect` uses local rules, `classify` is eligible for semantic selection, and `explicit` activates only when requested or directly injected. Only `core`, `safety`, and `concise-output` are universal. Detailed implementation, testing, tool-use, and delegation guidance is explicit and attached to the workflows and agents that need it, which keeps ordinary turns readable without weakening execution paths.
+
+Automatic classify-only activation is disabled because the package default has no classifier and enabling one would send the current prompt plus classify-skill descriptions to an external model provider, adding latency and cost. Classify-only capabilities remain available through `/skill:<name>` and through explicit prompt/subagent skill arrays. This repository does not enable automatic classifier calls or patch `pi-prompt-composer`.
 
 ### Inheritance chain (work machine)
 

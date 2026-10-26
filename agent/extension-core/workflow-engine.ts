@@ -13,7 +13,7 @@ export type PhaseContextMode = "full" | "compact" | "file-only" | "none";
 export type PhaseCapability = "filesystem-write" | "shell";
 
 export interface WorkflowContextBudget {
-  /** Max characters kept for one compacted subagent output */
+  /** Max characters kept for an explicit compact summary */
   compactOutputChars: number;
   /** Max characters injected for the aggregate {context} placeholder */
   aggregateContextChars: number;
@@ -395,7 +395,7 @@ export class WorkflowEngine {
     this.updateUI(ctx);
 
     // Send phase instructions to the LLM
-    const message = this.buildPhaseMessage(phase, tasks);
+    const message = this.buildPhaseMessage(phase);
     this.pi.sendUserMessage(message, { deliverAs: "followUp" });
   }
 
@@ -418,14 +418,6 @@ export class WorkflowEngine {
     };
 
     this.context.phases[phaseId] = result;
-
-    if (ctx.hasUI) {
-      const icon = result.status === "completed" ? "✅" : "⚠️";
-      (ctx as { ui: ExtensionContext["ui"] }).ui.notify(
-        `${icon} Phase "${phase.label}" ${result.status} (${formatDuration(elapsed)})`,
-        result.status === "completed" ? "info" : "warning",
-      );
-    }
 
     // Interrupted/pending work must never enter conditional or loop transitions.
     if (this.phaseStopReason) {
@@ -534,62 +526,21 @@ export class WorkflowEngine {
     ];
 
     if (phase.execution === "parallel" && tasks.length > 1) {
-      lines.push(`Execute ${tasks.length} investigation tracks in parallel using the \`subagent\` tool:`);
-      lines.push("");
-      for (const task of tasks) {
-        const resolved = this.resolveTemplate(task.task);
-        lines.push(`- **${task.agent}**: "${resolved}"`);
-        if (task.model !== undefined) lines.push(`  - Model: \`${task.model}\``);
-      }
-    } else {
-      for (const task of tasks) {
-        const resolved = this.resolveTemplate(task.task);
-        lines.push(`Execute this phase using the \`subagent\` tool:`);
-        lines.push(`- Agent: \`${task.agent}\``);
-        if (task.model !== undefined) lines.push(`- Model: \`${task.model}\``);
-        lines.push(`- Task: "${resolved}"`);
-        if (task.skill && task.skill.length > 0) {
-          lines.push(`- Skills: ${task.skill.join(", ")}`);
-        }
-      }
-    }
-
-    lines.push("");
-    lines.push("Use explicit async: false for every phase dispatch (foreground only). Do not resume interrupted/detached children automatically.");
-    lines.push("After the subagent(s) complete, summarize the outcome briefly. The workflow engine will advance to the next phase.");
-    lines.push("");
-    lines.push("**Do not skip phases or execute future phases prematurely.**");
-
-    return lines.join("\n");
-  }
-
-  private buildPhaseMessage(phase: PhaseDefinition, tasks: PhaseTask[]): string {
-    const phaseIndex = this.definition.phases.indexOf(phase);
-    const total = this.definition.phases.length;
-
-    const lines = [
-      `**Workflow "${this.definition.name}" — Phase ${phaseIndex + 1}/${total}: ${phase.label}**`,
-      "",
-    ];
-
-    if (phase.execution === "parallel" && tasks.length > 1) {
-      lines.push(`Run these ${tasks.length} investigation tracks in parallel using the \`subagent\` tool with \`tasks\` (parallel mode):`);
-      lines.push("");
+      lines.push(`Dispatch ${tasks.length} tasks with this exact \`subagent\` payload:`);
       lines.push("```json");
       lines.push(JSON.stringify({
         async: false,
-        tasks: tasks.map((t) => ({
-          agent: t.agent,
-          task: this.resolveTemplate(t.task),
-          ...(t.skill ? { skill: t.skill } : {}),
-          ...(t.model !== undefined ? { model: t.model } : {}),
+        tasks: tasks.map((task) => ({
+          agent: task.agent,
+          task: this.resolveTemplate(task.task),
+          ...(task.skill ? { skill: task.skill } : {}),
+          ...(task.model !== undefined ? { model: task.model } : {}),
         })),
       }, null, 2));
       lines.push("```");
     } else {
       for (const task of tasks) {
-        lines.push(`Use the \`subagent\` tool to execute this phase:`);
-        lines.push("");
+        lines.push("Dispatch this exact `subagent` payload:");
         lines.push("```json");
         lines.push(JSON.stringify({
           async: false,
@@ -602,7 +553,22 @@ export class WorkflowEngine {
       }
     }
 
+    lines.push("");
+    lines.push("Do not resume interrupted or detached children automatically.");
+    if (phaseIndex === total - 1) {
+      lines.push("After the subagent completes, return its final output once as the workflow answer. Do not add a second summary or recap.");
+    } else {
+      lines.push("The workflow engine records the result and advances the phase. Do not add a separate phase recap.");
+    }
+    lines.push("**Do not skip phases or execute future phases prematurely.**");
+
     return lines.join("\n");
+  }
+
+  private buildPhaseMessage(phase: PhaseDefinition): string {
+    const phaseIndex = this.definition.phases.indexOf(phase);
+    const total = this.definition.phases.length;
+    return `**Workflow "${this.definition.name}" — Phase ${phaseIndex + 1}/${total}: ${phase.label}**`;
   }
 
   // ── Template resolution ──
@@ -654,7 +620,6 @@ export class WorkflowEngine {
   }): TaskOutput {
     const budget = this.contextBudget(input.phase);
     const mode = input.phase.contextMode ?? this.definition.contextMode ?? "compact";
-    const defaultSummary = summarizeText(input.rawOutput, budget.compactOutputChars);
     const hookSummary = input.phase.summarizeOutput?.({
       phase: input.phase,
       task: input.task,
@@ -680,7 +645,9 @@ export class WorkflowEngine {
       topFindings: normalized.topFindings ?? extractTopFindings(input.rawOutput, budget.topFindings),
     };
 
-    const compactResult = renderCompactResult(receipt, normalized.summary ?? defaultSummary);
+    const compactResult = normalized.summary
+      ? renderCompactResult(receipt, normalized.summary)
+      : renderReceipt(receipt);
     const receiptOnly = renderReceipt(receipt);
     const result = mode === "full"
       ? input.rawOutput
@@ -756,12 +723,6 @@ function clampSummary(summary: OutputSummary, budget: WorkflowContextBudget): Ou
   };
 }
 
-function summarizeText(text: string, maxChars: number): string {
-  const trimmed = text.trim();
-  if (!trimmed) return "(no output)";
-  return truncateText(trimmed, maxChars);
-}
-
 function truncateText(text: string, maxChars: number): string {
   if (text.length <= maxChars) return text;
   const omitted = text.length - maxChars;
@@ -769,11 +730,25 @@ function truncateText(text: string, maxChars: number): string {
 }
 
 function renderCompactResult(receipt: TaskReceipt, summary: string): string {
-  const parts = [renderReceipt(receipt)];
-  if (summary) {
-    parts.push("", "Summary:", summary);
-  }
+  const context = removeRepeatedVerdict(summary, receipt.verdict);
+  const missingFindings = receipt.topFindings.filter((finding) => !context.includes(finding));
+  const compactReceipt = { ...receipt, topFindings: missingFindings };
+  const parts = [renderReceipt(compactReceipt)];
+  if (context) parts.push("", "Context:", context);
   return parts.join("\n");
+}
+
+function removeRepeatedVerdict(summary: string, verdict?: string): string {
+  if (!verdict) return summary.trim();
+  return summary
+    .split("\n")
+    .filter((line) => !new RegExp(`^\\s*(?:Verdict|Status|Result):\\s*${escapeRegExp(verdict)}\\s*$`, "i").test(line))
+    .join("\n")
+    .trim();
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function renderReceipt(receipt: TaskReceipt): string {
@@ -785,9 +760,7 @@ function renderReceipt(receipt: TaskReceipt): string {
 
   if (receipt.topFindings.length > 0) {
     lines.push("Top findings:");
-    for (const finding of receipt.topFindings) {
-      lines.push(`- ${finding}`);
-    }
+    for (const finding of receipt.topFindings) lines.push(`- ${finding}`);
   }
 
   return lines.join("\n");

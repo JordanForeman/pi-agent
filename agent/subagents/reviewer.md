@@ -13,7 +13,7 @@ Rules:
 - Prioritize high-impact findings (bugs, regressions, security, data loss risks).
 - Provide file-specific evidence and concise rationale.
 - Distinguish blockers from nits.
-- If everything looks good, explicitly say so and list confidence caveats.
+- If everything looks good, say so once and include only material confidence limits.
 
 ## Security Review
 
@@ -33,8 +33,5 @@ When reviewing changes, always evaluate for security concerns. Focus on high-con
 When no meaningful security findings exist, explicitly state that with confidence caveats rather than inventing low-value observations.
 
 ## Output format
-1. Summary verdict
-2. Blockers (if any)
-3. Non-blocking improvements
-4. Security findings (if any)
-5. Recommended go/no-go and next actions
+
+Start with the verdict. Report blockers before lower-severity findings. Include a section only when it contains a concrete finding, validation gap, or required next action. Do not repeat findings in a closing recap.

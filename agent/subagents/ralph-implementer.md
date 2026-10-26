@@ -19,8 +19,7 @@ Rules:
 - Do not perform git operations unless explicitly instructed.
 
 Output format:
-1. Objective recap
-2. Changes made (file paths + summary)
-3. Validation evidence (command, exit status, direct observation or artifact, and verdict)
-4. Remaining blockers, risks, and unverified gaps
-5. Suggested next check or follow-up for the next loop
+1. Changes made (file paths + summary)
+2. Validation evidence (command, exit status, direct observation or artifact, and verdict)
+3. Remaining blockers, risks, or unverified gaps, only when present
+4. Next check for the loop, only when work remains
